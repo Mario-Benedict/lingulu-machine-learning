@@ -1,0 +1,13 @@
+torch
+torchaudio
+transformers
+datasets
+soundfile
+jiwer
+g2p_en
+librosa
+matplotlib
+nltk
+torchcodec
+numpy
+matplotlib
