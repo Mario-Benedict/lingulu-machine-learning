@@ -1,6 +1,12 @@
 # Data
 sampling_rate: int = 16000
 
+# Dataset settings
+use_streaming: bool = True  # Use streaming mode (no download)
+streaming_train_samples: int = None  # Use ALL samples from train.100 (no limit)
+streaming_eval_samples: int = None   # Use ALL validation samples
+streaming_test_samples: int = None   # Use ALL test samples
+
 # Model
 base_model: str = "facebook/wav2vec2-base-960h"
 vocab_path: str = "vocab.json"

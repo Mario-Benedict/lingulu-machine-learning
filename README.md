@@ -18,7 +18,9 @@ Model pronunciation assessment berbasis Wav2Vec2 dengan custom layers untuk eval
 pip install -r requirements.txt
 ```
 
-### 2. Train Model
+**Note**: Tidak perlu install FFmpeg! Audio decoding menggunakan soundfile + librosa.
+
+### 2. Train Model (Streaming Mode - No Download!)
 
 ```bash
 cd model
@@ -26,12 +28,23 @@ python train.py
 ```
 
 Model akan:
-- Load LibriSpeech dataset
-- Convert text ke IPA phonemes
-- Train dengan custom architecture
-- Save model di `./wav2vec2-pronunciation-ctc/`
+- ✅ Stream dataset dari HuggingFace (no download!)
+- ✅ Convert text ke IPA phonemes
+- ✅ Train dengan custom architecture
+- ✅ Save model di `./wav2vec2-pronunciation-ctc/`
 
-### 3. Test Model
+**Default**: Training menggunakan 5000 samples (hemat waktu & storage)
+
+### 3. Train dengan Full Dataset
+
+Edit `model/config.py`:
+```python
+use_streaming: bool = False  # Download full dataset
+# atau
+streaming_train_samples: int = None  # Use all samples in streaming
+```
+
+### 4. Test Model
 
 ```bash
 python example_usage.py
@@ -60,6 +73,18 @@ lingulu-machine-learning/
 ## ⚙️ Konfigurasi
 
 Edit `model/config.py` untuk mengubah:
+
+### Dataset Settings
+```python
+use_streaming: bool = True              # Streaming mode (no download)
+streaming_train_samples: int = 5000     # Limit samples (None = all)
+streaming_eval_samples: int = 500       # Eval samples
+streaming_test_samples: int = 500       # Test samples
+```
+
+**Streaming vs Download:**
+- **Streaming** (default): 0GB storage, butuh internet, start langsung
+- **Download**: ~6.5GB storage, bisa offline, training lebih cepat
 
 ### Model Architecture
 ```python

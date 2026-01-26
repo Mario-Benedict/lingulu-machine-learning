@@ -99,15 +99,21 @@ def extract_vocab(batch):
 
 
 def build_vocab(dataset, vocab_path: str):
-    """Build and save vocabulary from dataset."""
-    vocabs = dataset.map(
-        extract_vocab,
-        batched=True,
-        batch_size=-1,
-        remove_columns=dataset.column_names
-    )
+    """Build and save vocabulary from dataset (streaming compatible)."""
+    print("Building vocabulary from phonemes...")
     
-    vocab_list = sorted(list(set(vocabs["vocab"])))
+    # Collect all unique phoneme characters from streaming dataset
+    vocab_chars = set()
+    sample_count = 0
+    
+    for batch in dataset:
+        if "phonemes" in batch:
+            vocab_chars.update(list(batch["phonemes"]))
+            sample_count += 1
+            if sample_count % 1000 == 0:
+                print(f"  Processed {sample_count} samples, {len(vocab_chars)} unique chars")
+    
+    vocab_list = sorted(list(vocab_chars))
     vocab_dict = {v: i for i, v in enumerate(vocab_list)}
     
     # Add special tokens
@@ -118,85 +124,144 @@ def build_vocab(dataset, vocab_path: str):
     with open(vocab_path, "w") as f:
         json.dump(vocab_dict, f)
     
-    print(f"Vocab size: {len(vocab_dict)}")
+    print(f"✓ Vocab size: {len(vocab_dict)} (from {sample_count} samples)")
     return vocab_dict
 
 def load_audio_librosa(batch):
-    path = batch["audio"]["path"]
-
-    speech, _ = librosa.load(
-        path,
-        sr=config.sampling_rate,
-        mono=True
-    )
-
-    batch["speech"] = speech
+    """Load audio using librosa when audio column has bytes."""
+    import io
+    import soundfile as sf
+    
+    # Handle both streaming (bytes) and downloaded (path) formats
+    if isinstance(batch["audio"], dict):
+        if "bytes" in batch["audio"] and batch["audio"]["bytes"] is not None:
+            # Streaming mode - decode from bytes
+            audio_bytes = batch["audio"]["bytes"]
+            audio_array, sr = sf.read(io.BytesIO(audio_bytes))
+            
+            # Resample if needed
+            if sr != config.sampling_rate:
+                audio_array = librosa.resample(
+                    audio_array,
+                    orig_sr=sr,
+                    target_sr=config.sampling_rate
+                )
+        elif "path" in batch["audio"] and batch["audio"]["path"] is not None:
+            # Downloaded mode - load from path
+            audio_array, _ = librosa.load(
+                batch["audio"]["path"],
+                sr=config.sampling_rate,
+                mono=True
+            )
+        else:
+            raise ValueError("Audio data not found in expected format")
+    else:
+        raise ValueError("Unexpected audio format")
+    
+    # Ensure mono
+    if len(audio_array.shape) > 1:
+        audio_array = librosa.to_mono(audio_array.T)
+    
+    batch["speech"] = audio_array
     batch["sampling_rate"] = config.sampling_rate
     return batch
 
 def load_librispeech_datasets():
-    """Load train, validation, and test datasets from LibriSpeech."""
-    print("Loading datasets...")
+    """Load train, validation, and test datasets from LibriSpeech using streaming."""
+    use_streaming = getattr(config, 'use_streaming', True)
+    
+    if use_streaming:
+        print("🚀 Loading datasets in STREAMING mode (no download needed)...")
+        print("💾 Storage used: 0GB")
+        print("⚠️  Internet required during training\n")
+    else:
+        print("📥 Loading datasets in DOWNLOAD mode...")
+        print("⚠️  This will download ~6.5GB of data\n")
     
     # Load train dataset
+    print("Loading train split...")
     train_dataset = load_dataset(
         "librispeech_asr",
         "clean",
         split="train.100",
+        streaming=use_streaming,
     )
     
-    # Load validation dataset (dev-clean)
+    # Load validation dataset
+    print("Loading validation split...")
     eval_dataset = load_dataset(
         "librispeech_asr",
-        "dev_clean",
+        "clean",
         split="validation",
+        streaming=use_streaming,
     )
     
-    # Load test dataset (test-clean)
+    # Load test dataset
+    print("Loading test split...")
     test_dataset = load_dataset(
         "librispeech_asr",
-        "test_clean",
+        "clean",
         split="test",
-    )
-
-    train_dataset = train_dataset.map(
-        load_audio_librosa,
-        remove_columns=train_dataset.column_names,
-        num_proc=1
-    )
-
-    eval_dataset = eval_dataset.map(
-        load_audio_librosa,
-        remove_columns=eval_dataset.column_names,
-        num_proc=1
-    )
-
-    test_dataset = test_dataset.map(
-        load_audio_librosa,
-        remove_columns=test_dataset.column_names,
-        num_proc=1
+        streaming=use_streaming,
     )
     
-    print(f"Train samples: {len(train_dataset)}")
-    print(f"Eval samples: {len(eval_dataset)}")
-    print(f"Test samples: {len(test_dataset)}")
+    # Apply sample limits if streaming
+    if use_streaming:
+        train_limit = getattr(config, 'streaming_train_samples', None)
+        eval_limit = getattr(config, 'streaming_eval_samples', None)
+        test_limit = getattr(config, 'streaming_test_samples', None)
+        
+        if train_limit:
+            train_dataset = train_dataset.take(train_limit)
+            print(f"  ├─ Train: limited to {train_limit} samples")
+        else:
+            print(f"  ├─ Train: using ALL samples")
+            
+        if eval_limit:
+            eval_dataset = eval_dataset.take(eval_limit)
+            print(f"  ├─ Eval: limited to {eval_limit} samples")
+        else:
+            print(f"  ├─ Eval: using ALL samples")
+            
+        if test_limit:
+            test_dataset = test_dataset.take(test_limit)
+            print(f"  └─ Test: limited to {test_limit} samples")
+        else:
+            print(f"  └─ Test: using ALL samples")
+        
+        print("\n✅ Datasets loaded in streaming mode (using full dataset)")
+        print("💡 Tip: Edit config.py to set limits if needed")
+    else:
+        print(f"\n✅ Datasets downloaded")
+        print(f"  ├─ Train samples: {len(train_dataset)}")
+        print(f"  ├─ Eval samples: {len(eval_dataset)}")
+        print(f"  └─ Test samples: {len(test_dataset)}")
     
-    return DatasetDict({
+    print()
+    
+    return {
         "train": train_dataset,
         "eval": eval_dataset,
         "test": test_dataset
-    })
+    }
 
 
 def prepare_dataset_fn(processor):
-    """Return a function to prepare dataset samples."""
+    """Return a function to prepare dataset samples (streaming compatible)."""
     def prepare_dataset(batch):
-        audio = batch["audio"]
+        # Use pre-loaded speech from load_audio_librosa
+        if "speech" in batch:
+            audio_array = batch["speech"]
+        else:
+            raise ValueError("Audio not loaded. Run load_audio_librosa first.")
+        
+        # Process audio with feature extractor
         batch["input_values"] = processor(
-            audio["array"],
-            sampling_rate=16000
+            audio_array,
+            sampling_rate=config.sampling_rate
         ).input_values[0]
         
+        # Encode phonemes to labels
         batch["labels"] = processor.tokenizer(batch["phonemes"]).input_ids
         return batch
     
@@ -204,16 +269,28 @@ def prepare_dataset_fn(processor):
 
 
 def process_datasets(datasets, processor):
-    """Process all datasets with the processor."""
-    prepare_fn = prepare_dataset_fn(processor)
+    """Process all datasets with the processor (streaming compatible)."""
+    from datasets import Dataset
+    from itertools import islice
     
-    processed = DatasetDict()
+    prepare_fn = prepare_dataset_fn(processor)
+    processed = {}
+    
     for split_name, dataset in datasets.items():
-        print(f"Processing {split_name} dataset...")
-        processed[split_name] = dataset.map(
+        print(f"\nProcessing {split_name} dataset...")
+        
+        # Load audio first (decode bytes to numpy arrays)
+        print(f"  Step 1/2: Loading audio from stream...")
+        dataset_with_audio = dataset.map(load_audio_librosa)
+        
+        # Then prepare for model (extract features, tokenize phonemes)
+        print(f"  Step 2/2: Extracting features and tokenizing...")
+        processed_dataset = dataset_with_audio.map(
             prepare_fn,
-            remove_columns=dataset.column_names,
-            num_proc=1
+            remove_columns=["speech", "sampling_rate"],  # Keep only input_values and labels
         )
+        
+        processed[split_name] = processed_dataset
+        print(f"✓ {split_name} dataset ready")
     
     return processed

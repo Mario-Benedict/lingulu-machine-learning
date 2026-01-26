@@ -28,17 +28,24 @@ def main():
     
     # Convert text to phonemes (using IPA if configured)
     print("\nConverting text to phonemes...")
-    datasets = datasets.map(text_to_phoneme_chars)
+    print("Processing streaming datasets...")
     
-    # Build vocabulary from train dataset
-    print("Building vocabulary...")
-    vocab_dict = build_vocab(datasets["train"], config.vocab_path)
+    # Map text_to_phoneme_chars to streaming datasets
+    datasets_with_phonemes = {}
+    for split_name, dataset in datasets.items():
+        print(f"  Converting {split_name} to phonemes...")
+        datasets_with_phonemes[split_name] = dataset.map(text_to_phoneme_chars)
+    
+    # Build vocabulary from train dataset (streaming compatible)
+    print("\nBuilding vocabulary from train dataset...")
+    vocab_dict = build_vocab(datasets_with_phonemes["train"], config.vocab_path)
     
     # Create processor
     processor = create_processor(config.vocab_path, config.sampling_rate)
     
-    # Process datasets
-    processed_datasets = process_datasets(datasets, processor)
+    # Process datasets (load audio, extract features, tokenize)
+    print("\nPreparing datasets for training...")
+    processed_datasets = process_datasets(datasets_with_phonemes, processor)
     
     # Create custom model with pronunciation layers
     model = create_model(config, processor, device)
