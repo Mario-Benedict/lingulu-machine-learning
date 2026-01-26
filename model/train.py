@@ -18,11 +18,17 @@ def main():
     config = Config()
     device = get_device()
     
+    print("\n=== Pronunciation Assessment Training ===")
+    print(f"Using IPA phonemes: {config.use_ipa_phonemes}")
+    print(f"Custom pronunciation layers: {config.num_pronunciation_layers}")
+    print(f"Stress markers: {config.include_stress_markers}")
+    print(f"Syllable boundaries: {config.include_syllable_boundaries}")
+    
     # Load datasets
     datasets = load_librispeech_datasets(config)
     
-    # Convert text to phonemes
-    print("Converting text to phonemes...")
+    # Convert text to phonemes (using IPA if configured)
+    print("\nConverting text to phonemes...")
     datasets = datasets.map(text_to_phoneme_chars)
     
     # Build vocabulary from train dataset
@@ -35,13 +41,13 @@ def main():
     # Process datasets
     processed_datasets = process_datasets(datasets, processor)
     
-    # Create model
+    # Create custom model with pronunciation layers
     model = create_model(config, processor, device)
     
     # Create data collator
     data_collator = DataCollatorCTCWithPadding(processor=processor)
     
-    # Training arguments
+    # Training arguments with warmup
     training_args = TrainingArguments(
         output_dir=config.output_dir,
         per_device_train_batch_size=config.batch_size,
@@ -49,6 +55,7 @@ def main():
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         num_train_epochs=config.num_epochs,
         learning_rate=config.learning_rate,
+        warmup_steps=config.warmup_steps,  # Added warmup for better training
         fp16=config.fp16,
         logging_steps=config.logging_steps,
         eval_strategy="steps",
@@ -58,7 +65,8 @@ def main():
         load_best_model_at_end=True,
         metric_for_best_model="per",
         greater_is_better=False,
-        report_to="none"
+        report_to="none",
+        gradient_checkpointing=True,  # Save memory for larger model
     )
     
     # Create trainer
@@ -73,7 +81,8 @@ def main():
     )
     
     # Train
-    print("Starting training...")
+    print("\n=== Starting Training ===")
+    print("Training custom pronunciation assessment model...")
     trainer.train()
     
     # Save model
@@ -110,7 +119,6 @@ def main():
         print(f"Ref:  {refs[i]}")
         print(f"Pred: {preds[i]}")
         print("-" * 50)
-
 
 if __name__ == "__main__":
     main()

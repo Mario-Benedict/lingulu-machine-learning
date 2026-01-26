@@ -1,20 +1,93 @@
 import re
 import json
 import nltk
-from datasets import load_dataset, Audio, DatasetDict
+from datasets import load_dataset, DatasetDict, disable_caching
 from g2p_en import G2p
+import eng_to_ipa as ipa  # For IPA conversion
+import librosa
+import config
+
+disable_caching()
 
 nltk.download('averaged_perceptron_tagger_eng', quiet=True)
 
 g2p = G2p()
 
 
+def text_to_ipa_phonemes(text: str, include_stress: bool = True, include_syllables: bool = True):
+    """
+    Convert text to IPA (International Phonetic Alphabet) phonemes.
+    More accurate for pronunciation assessment than simple G2P.
+    
+    Args:
+        text: Input text to convert
+        include_stress: Include stress markers (ˈ for primary, ˌ for secondary)
+        include_syllables: Include syllable boundary markers (.)
+    
+    Returns:
+        String of IPA phonemes
+    """
+    # Clean text
+    text = re.sub(r"[^a-zA-Z ]", "", text).lower()
+    
+    try:
+        # Convert to IPA using eng_to_ipa library
+        ipa_text = ipa.convert(text)
+        
+        # If conversion failed, fall back to G2P
+        if ipa_text == text or ipa_text == "*":
+            phonemes = g2p(text)
+            phonemes = [p.lower() for p in phonemes if p.isalpha()]
+            return "".join(phonemes)
+        
+        # Process IPA text
+        result = ipa_text
+        
+        if not include_stress:
+            # Remove stress markers
+            result = result.replace("ˈ", "").replace("ˌ", "")
+        
+        if not include_syllables:
+            # Remove syllable boundaries
+            result = result.replace(".", "")
+        
+        # Remove spaces and keep only phonetic characters
+        result = result.replace(" ", "|")  # Use | as word boundary
+        
+        return result
+        
+    except Exception as e:
+        # Fallback to G2P if IPA conversion fails
+        print(f"IPA conversion failed for '{text}': {e}. Using G2P fallback.")
+        phonemes = g2p(text)
+        phonemes = [p.lower() for p in phonemes if p.isalpha()]
+        return "".join(phonemes)
+
+
 def text_to_phoneme_chars(batch):
-    """Convert text to phoneme characters."""
-    text = re.sub(r"[^a-zA-Z ]", "", batch["text"]).lower()
-    phonemes = g2p(text)
-    phonemes = [p.lower() for p in phonemes if p.isalpha()]
-    batch["phonemes"] = "".join(phonemes)
+    """
+    Convert text to phoneme characters.
+    Uses IPA for pronunciation if configured, otherwise falls back to G2P.
+    """
+    config_module = config
+    
+    if hasattr(config_module, 'use_ipa_phonemes') and config_module.use_ipa_phonemes:
+        # Use IPA phonemes for pronunciation assessment
+        include_stress = getattr(config_module, 'include_stress_markers', True)
+        include_syllables = getattr(config_module, 'include_syllable_boundaries', True)
+        
+        batch["phonemes"] = text_to_ipa_phonemes(
+            batch["text"],
+            include_stress=include_stress,
+            include_syllables=include_syllables
+        )
+    else:
+        # Original G2P method
+        text = re.sub(r"[^a-zA-Z ]", "", batch["text"]).lower()
+        phonemes = g2p(text)
+        phonemes = [p.lower() for p in phonemes if p.isalpha()]
+        batch["phonemes"] = "".join(phonemes)
+    
     return batch
 
 
@@ -48,39 +121,61 @@ def build_vocab(dataset, vocab_path: str):
     print(f"Vocab size: {len(vocab_dict)}")
     return vocab_dict
 
+def load_audio_librosa(batch):
+    path = batch["audio"]["path"]
 
-def load_librispeech_datasets(config):
+    speech, _ = librosa.load(
+        path,
+        sr=config.sampling_rate,
+        mono=True
+    )
+
+    batch["speech"] = speech
+    batch["sampling_rate"] = config.sampling_rate
+    return batch
+
+def load_librispeech_datasets():
     """Load train, validation, and test datasets from LibriSpeech."""
     print("Loading datasets...")
     
     # Load train dataset
     train_dataset = load_dataset(
         "librispeech_asr",
-        "clean",
-        split="train.100",
-        streaming=False
+        "train_clean_100",
+        split="train",
     )
     
     # Load validation dataset (dev-clean)
     eval_dataset = load_dataset(
         "librispeech_asr",
-        "clean",
+        "dev_clean",
         split="validation",
-        streaming=False
     )
     
     # Load test dataset (test-clean)
     test_dataset = load_dataset(
         "librispeech_asr",
-        "clean",
+        "test_clean",
         split="test",
-        streaming=False
     )
 
-    # Cast audio column to correct sampling rate
-    train_dataset = train_dataset.cast_column("audio", Audio(sampling_rate=config.sampling_rate))
-    eval_dataset = eval_dataset.cast_column("audio", Audio(sampling_rate=config.sampling_rate))
-    test_dataset = test_dataset.cast_column("audio", Audio(sampling_rate=config.sampling_rate))
+    train_dataset = train_dataset.map(
+        load_audio_librosa,
+        remove_columns=train_dataset.column_names,
+        num_proc=1
+    )
+
+    eval_dataset = eval_dataset.map(
+        load_audio_librosa,
+        remove_columns=eval_dataset.column_names,
+        num_proc=1
+    )
+
+    test_dataset = test_dataset.map(
+        load_audio_librosa,
+        remove_columns=test_dataset.column_names,
+        num_proc=1
+    )
     
     print(f"Train samples: {len(train_dataset)}")
     print(f"Eval samples: {len(eval_dataset)}")
