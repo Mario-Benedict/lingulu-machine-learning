@@ -141,8 +141,8 @@ def load_librispeech_datasets():
     # Load train dataset
     train_dataset = load_dataset(
         "librispeech_asr",
-        "train_clean_100",
-        split="train",
+        "clean",
+        split="train.100",
     )
     
     # Load validation dataset (dev-clean)
