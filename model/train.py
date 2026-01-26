@@ -1,6 +1,6 @@
 from transformers import TrainingArguments, Trainer
 
-from config import Config
+import config
 from data_loader import (
     load_librispeech_datasets,
     text_to_phoneme_chars,
@@ -15,7 +15,6 @@ from visualization import plot_training_history, plot_per_comparison
 
 def main():
     # Initialize config and device
-    config = Config()
     device = get_device()
     
     print("\n=== Pronunciation Assessment Training ===")
@@ -25,7 +24,7 @@ def main():
     print(f"Syllable boundaries: {config.include_syllable_boundaries}")
     
     # Load datasets
-    datasets = load_librispeech_datasets(config)
+    datasets = load_librispeech_datasets()
     
     # Convert text to phonemes (using IPA if configured)
     print("\nConverting text to phonemes...")
