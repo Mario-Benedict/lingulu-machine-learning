@@ -2,10 +2,18 @@
 sampling_rate: int = 16000
 
 # Dataset settings
-use_streaming: bool = True  # Use streaming mode (no download)
-streaming_train_samples: int = None  # Use ALL samples from train.100 (no limit)
-streaming_eval_samples: int = None   # Use ALL validation samples
-streaming_test_samples: int = None   # Use ALL test samples
+use_local_dataset: bool = True  # Use local LibriSpeech dataset
+local_dataset_path: str = "C:/path/to/LibriSpeech"  # Update this path!
+# Folder structure expected:
+# LibriSpeech/
+#   ├── train-clean-100/
+#   ├── dev-clean/
+#   └── test-clean/
+
+use_streaming: bool = False  # Not used when use_local_dataset=True
+streaming_train_samples: int = None  # Not used when use_local_dataset=True
+streaming_eval_samples: int = None
+streaming_test_samples: int = None
 
 # Model
 base_model: str = "facebook/wav2vec2-base-960h"

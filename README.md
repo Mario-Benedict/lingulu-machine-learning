@@ -20,7 +20,35 @@ pip install -r requirements.txt
 
 **Note**: Tidak perlu install FFmpeg! Audio decoding menggunakan soundfile + librosa.
 
-### 2. Train Model (Streaming Mode - No Download!)
+### 2. Pilih Mode Dataset
+
+#### Option A: Local Dataset (Recommended - Fastest)
+
+Jika sudah punya LibriSpeech di folder lokal:
+
+Edit `model/config.py`:
+```python
+use_local_dataset: bool = True
+local_dataset_path: str = "C:/path/to/LibriSpeech"  # Update path!
+```
+
+Lihat [LOCAL_DATASET_GUIDE.md](LOCAL_DATASET_GUIDE.md) untuk detail.
+
+#### Option B: Streaming (No Download)
+
+```python
+use_local_dataset: bool = False
+use_streaming: bool = True
+```
+
+#### Option C: HuggingFace Download
+
+```python
+use_local_dataset: bool = False
+use_streaming: bool = False
+```
+
+### 3. Train Model
 
 ```bash
 cd model
@@ -28,21 +56,10 @@ python train.py
 ```
 
 Model akan:
-- ✅ Stream dataset dari HuggingFace (no download!)
+- ✅ Load dataset (local/streaming/download)
 - ✅ Convert text ke IPA phonemes
 - ✅ Train dengan custom architecture
 - ✅ Save model di `./wav2vec2-pronunciation-ctc/`
-
-**Default**: Training menggunakan 5000 samples (hemat waktu & storage)
-
-### 3. Train dengan Full Dataset
-
-Edit `model/config.py`:
-```python
-use_streaming: bool = False  # Download full dataset
-# atau
-streaming_train_samples: int = None  # Use all samples in streaming
-```
 
 ### 4. Test Model
 
@@ -76,15 +93,23 @@ Edit `model/config.py` untuk mengubah:
 
 ### Dataset Settings
 ```python
-use_streaming: bool = True              # Streaming mode (no download)
-streaming_train_samples: int = 5000     # Limit samples (None = all)
-streaming_eval_samples: int = 500       # Eval samples
-streaming_test_samples: int = 500       # Test samples
+# Option 1: Local Dataset (Fastest)
+use_local_dataset: bool = True
+local_dataset_path: str = "C:/path/to/LibriSpeech"
+
+# Option 2: Streaming (No storage)
+use_local_dataset: bool = False
+use_streaming: bool = True
+
+# Option 3: Download
+use_local_dataset: bool = False
+use_streaming: bool = False
 ```
 
-**Streaming vs Download:**
-- **Streaming** (default): 0GB storage, butuh internet, start langsung
-- **Download**: ~6.5GB storage, bisa offline, training lebih cepat
+**Comparison:**
+- **Local**: Fastest, offline, need ~6.5GB storage
+- **Streaming**: 0GB storage, butuh internet, slower
+- **Download**: Fast, offline after download, ~6.5GB cache
 
 ### Model Architecture
 ```python
