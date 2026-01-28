@@ -283,7 +283,7 @@ def load_librispeech_datasets():
         print("=" * 60)
         
         # Load train dataset
-        train_dataset = load_local_librispeech_dataset(local_path, "train-clean-100")
+        train_dataset = load_local_librispeech_dataset(local_path, "train-clean")
         
         # Load validation dataset
         eval_dataset = load_local_librispeech_dataset(local_path, "dev-clean")
