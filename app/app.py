@@ -8,7 +8,7 @@ from app.config import get_config
 from app.utils.logger import setup_logger, get_logger
 from app.models import Wav2Vec2PronunciationModel
 from app.utils import AudioProcessor
-from app.middleware import setup_metrics
+from app.middleware import setup_metrics, setup_auth_middleware
 from app.routes import create_health_routes, create_prediction_routes
 
 
@@ -40,6 +40,13 @@ def create_app() -> Flask:
     metrics, model_latency = setup_metrics(app, buckets=config.METRICS_BUCKETS)
     logger.info("Metrics configured successfully")
     
+    # Setup authentication middleware
+    auth_middleware = setup_auth_middleware(
+        auth_service_url=config.AUTH_SERVICE_URL,
+        timeout=config.AUTH_TIMEOUT
+    )
+    logger.info("Authentication middleware configured successfully")
+    
     # Initialize components
     logger.info("Initializing ML model...")
     model = Wav2Vec2PronunciationModel(
@@ -64,7 +71,7 @@ def create_app() -> Flask:
     health_routes = create_health_routes(model)
     app.register_blueprint(health_routes)
     
-    prediction_routes = create_prediction_routes(model, audio_processor, model_latency)
+    prediction_routes = create_prediction_routes(model, audio_processor, model_latency, auth_middleware)
     app.register_blueprint(prediction_routes)
     
     logger.info("Application initialized successfully")

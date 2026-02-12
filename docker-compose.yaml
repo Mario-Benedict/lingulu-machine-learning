@@ -17,6 +17,9 @@ services:
       - SAMPLING_RATE=16000
       - MAX_AUDIO_LENGTH_SECONDS=60
       - MAX_FILE_SIZE_MB=10
+      # Authentication service configuration
+      - AUTH_SERVICE_URL=http://springboot-app:8080
+      - AUTH_TIMEOUT=5.0
     volumes:
       # Cache HuggingFace models to avoid re-downloading
       - huggingface_cache:/home/appuser/.cache/huggingface

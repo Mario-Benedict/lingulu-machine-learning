@@ -33,6 +33,10 @@ class Config:
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     
+    # Authentication Configuration
+    AUTH_SERVICE_URL = os.getenv('AUTH_SERVICE_URL', 'http://localhost:8080')
+    AUTH_TIMEOUT = float(os.getenv('AUTH_TIMEOUT', '5.0'))
+    
     @staticmethod
     def validate():
         """Validate configuration settings."""
