@@ -42,15 +42,16 @@ COPY --chown=appuser:appuser . .
 USER appuser
 
 # Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV FLASK_ENV=production
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000/health')" || exit 1
+ENV PYTHONUNBUFFERED=1 \
+    FLASK_ENV=production \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Expose port
 EXPOSE 5000
 
-# Run application with production server (gunicorn)
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "--log-level", "info", "app.app:create_app()"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/model/health')" || exit 1
+
+# Run application with gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app.app:create_app()"]

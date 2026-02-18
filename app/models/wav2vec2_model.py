@@ -178,7 +178,7 @@ class Wav2Vec2PronunciationModel:
                     gop_latency = time.perf_counter() - gop_start
                     
                     # Add GOP results to output
-                    result['pronunciation_assessment'] = sentence_score.to_dict()
+                    result['pronounciation_assessment'] = sentence_score.to_dict()
                     result['gop_latency_seconds'] = round(gop_latency, 4)
                     
                     logger.info(

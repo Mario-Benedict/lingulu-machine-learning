@@ -8,7 +8,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-health_bp = Blueprint('health', __name__)
+health_bp = Blueprint('health', __name__, url_prefix='/api/model')
 
 
 def create_health_routes(model):
