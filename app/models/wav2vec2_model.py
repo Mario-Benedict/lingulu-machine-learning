@@ -42,13 +42,16 @@ class Wav2Vec2PronunciationModel:
         self.model: Optional[Wav2Vec2ForCTC] = None
         self._is_loaded = False
         
+        # Device configuration - use CUDA if available
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         # GOP calculator (will be initialized with g2p on first use)
         self.gop_calculator: Optional[GOPCalculator] = None
         self.g2p_model = None
         
         logger.info(
             f"Initializing Wav2Vec2PronunciationModel with model: {model_id}, "
-            f"GOP enabled: {enable_gop}"
+            f"GOP enabled: {enable_gop}, Device: {self.device}"
         )
     
     def load(self) -> None:
@@ -92,6 +95,10 @@ class Wav2Vec2PronunciationModel:
             logger.debug("Loading model...")
             self.model = Wav2Vec2ForCTC.from_pretrained(self.model_id)
             
+            # Move model to device (GPU if available)
+            logger.debug(f"Moving model to device: {self.device}")
+            self.model.to(self.device)
+            
             # Set to evaluation mode
             self.model.eval()
             
@@ -99,9 +106,16 @@ class Wav2Vec2PronunciationModel:
             self._is_loaded = True
             
             logger.info(
-                f"Model loaded successfully in {load_time:.2f}s. "
+                f"Model loaded successfully in {load_time:.2f}s on {self.device}. "
                 f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}"
             )
+            
+            # Log GPU memory usage if using CUDA
+            if self.device.type == 'cuda':
+                logger.info(
+                    f"GPU Memory - Allocated: {torch.cuda.memory_allocated(0)/1024**2:.2f}MB, "
+                    f"Reserved: {torch.cuda.memory_reserved(0)/1024**2:.2f}MB"
+                )
             
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}", exc_info=True)
@@ -141,12 +155,15 @@ class Wav2Vec2PronunciationModel:
                 padding=True
             )
             
+            # Move inputs to device
+            input_values = inputs.input_values.to(self.device)
+            
             # Inference
             with torch.no_grad():
-                logits = self.model(inputs.input_values).logits
+                logits = self.model(input_values).logits
             
-            # Decoding
-            predicted_ids = torch.argmax(logits, dim=-1)
+            # Decoding (move to CPU for decoding)
+            predicted_ids = torch.argmax(logits, dim=-1).cpu()
             transcription = self.processor.batch_decode(predicted_ids)[0]
             
             latency = time.perf_counter() - start_time
@@ -164,8 +181,8 @@ class Wav2Vec2PronunciationModel:
                     logger.debug(f"Calculating GOP for reference: '{reference_text}'")
                     gop_start = time.perf_counter()
                     
-                    # Get log probabilities for GOP
-                    log_probs = torch.log_softmax(logits.squeeze(0), dim=-1)
+                    # Get log probabilities for GOP (move to CPU for compatibility)
+                    log_probs = torch.log_softmax(logits.squeeze(0), dim=-1).cpu()
                     
                     # Calculate GOP scores
                     sentence_score = self.gop_calculator.calculate_sentence_score(
@@ -221,12 +238,32 @@ class Wav2Vec2PronunciationModel:
             Dictionary with model information
         """
         if not self._is_loaded:
-            return {"loaded": False}
+            return {
+                "loaded": False,
+                "device": str(self.device)
+            }
         
-        return {
+        model_info = {
             "loaded": True,
             "model_id": self.model_id,
             "sampling_rate": self.sampling_rate,
             "parameters": sum(p.numel() for p in self.model.parameters()) if self.model else 0,
             "gop_enabled": self.enable_gop,
+            "device": str(self.device),
         }
+        
+        # Add GPU memory info if using CUDA
+        if self.device.type == 'cuda':
+            model_info.update({
+                "gpu_memory_allocated_mb": round(torch.cuda.memory_allocated(0) / 1024**2, 2),
+                "gpu_memory_reserved_mb": round(torch.cuda.memory_reserved(0) / 1024**2, 2),
+                "gpu_name": torch.cuda.get_device_name(0),
+            })
+        
+        return model_info
+    
+    def clear_cache(self) -> None:
+        """Clear GPU cache if using CUDA."""
+        if self.device.type == 'cuda':
+            torch.cuda.empty_cache()
+            logger.info("GPU cache cleared")
