@@ -12,7 +12,7 @@ from app.utils.exceptions import (
 
 logger = get_logger(__name__)
 
-predict_bp = Blueprint('predict', __name__)
+predict_bp = Blueprint('predict', __name__, url_prefix='/api/model')
 
 
 def create_prediction_routes(model, audio_processor, model_latency_metric, auth_middleware=None):
