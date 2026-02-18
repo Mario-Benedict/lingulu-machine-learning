@@ -35,8 +35,8 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code
-COPY --chown=appuser:appuser . .
+# Copy application code from app directory
+COPY --chown=appuser:appuser app/ .
 
 # Switch to non-root user
 USER appuser
