@@ -45,6 +45,7 @@ notebooks/
 # Docker
 docker-compose*.yml
 .dockerignore
+Dockerfile
 
 # CI/CD
 .github/
@@ -60,6 +61,11 @@ CLOUDWATCH_MIGRATION.md
 requirements-dev.txt
 pytest.ini
 .coveragerc
+.flake8
+.pylintrc
+.editorconfig
+setup.py
+pyproject.toml
 
 # Logs
 *.log
@@ -73,14 +79,24 @@ logs/
 # Cache
 .cache/
 *.cache
+.pytest_cache/
 
 # Models (will be downloaded at runtime)
 models/
 *.pt
 *.pth
 *.bin
+*.safetensors
+
+# Large test files
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
 
 # Misc
 *.bak
 *.tmp
+.coverage.*
 .coverage.*
