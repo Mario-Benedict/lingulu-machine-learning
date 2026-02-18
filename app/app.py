@@ -2,6 +2,7 @@
 Lingulu Machine Learning API
 A production-ready Flask application for pronunciation prediction using Wav2Vec2.
 """
+import os
 from flask import Flask
 
 from app.config import get_config
@@ -27,7 +28,7 @@ def create_app() -> Flask:
     logger = get_logger(__name__)
     
     logger.info("Starting Lingulu ML Application")
-    logger.info(f"Environment: {config.__name__}")
+    logger.info(f"Environment: {os.getenv('FLASK_ENV', 'production')}")
     
     # Create Flask app
     app = Flask(__name__)

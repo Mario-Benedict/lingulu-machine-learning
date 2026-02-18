@@ -66,7 +66,7 @@ class TestConfig(Config):
     LOG_LEVEL = 'DEBUG'
 
 
-def get_config() -> Config:
+def get_config() -> type[Config]:
     """Get configuration based on environment."""
     env = os.getenv('FLASK_ENV', 'production').lower()
     

@@ -160,7 +160,7 @@ class CloudWatchMetrics:
         metric_name: str, 
         value: float, 
         unit: str = 'None',
-        dimensions: dict = None
+        dimensions: dict | None = None
     ) -> None:
         """
         Record a custom metric to CloudWatch.

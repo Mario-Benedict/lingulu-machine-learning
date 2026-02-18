@@ -27,7 +27,7 @@ class AudioProcessor:
         sampling_rate: int = 16000,
         max_file_size_bytes: int = 10 * 1024 * 1024,
         max_audio_length_seconds: int = 60,
-        allowed_extensions: set = None
+        allowed_extensions: set | None = None
     ):
         """
         Initialize AudioProcessor.
@@ -136,7 +136,7 @@ class AudioProcessor:
                 f"samples={len(speech_array)}"
             )
             
-            return speech_array, sr
+            return speech_array, int(sr)
             
         except (AudioTooLongError, AudioProcessingError):
             raise

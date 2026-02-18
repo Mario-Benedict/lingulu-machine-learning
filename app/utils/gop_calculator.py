@@ -111,7 +111,7 @@ class GOPCalculator:
         
         # Backtrack to find alignment
         t, n = T, N
-        alignment = [[] for _ in range(N)]
+        alignment: list[list[int]] = [[] for _ in range(N)]
         
         while t > 0 and n >= 0:
             if n > 0:

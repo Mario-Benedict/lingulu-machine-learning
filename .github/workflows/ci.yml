@@ -35,6 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+          pip install -e .  # Install package in editable mode
       
       - name: Run linting with flake8
         run: |
@@ -52,7 +53,7 @@ jobs:
       - name: Run tests with pytest
         run: |
           if [ -d "tests" ] || [ -n "$(find . -name 'test_*.py')" ]; then
-            pytest --cov=app --cov-report=xml --cov-report=html --cov-report=term
+            PYTHONPATH=$PYTHONPATH:$(pwd) pytest --cov=app --cov-report=xml --cov-report=html --cov-report=term
           else
             echo "No tests found, skipping pytest"
           fi
