@@ -15,23 +15,21 @@ logger = get_logger(__name__)
 predict_bp = Blueprint('predict', __name__, url_prefix='/api/model')
 
 
-def create_prediction_routes(model, audio_processor, model_latency_metric, auth_middleware=None):
+def create_prediction_routes(model, audio_processor, cloudwatch_metrics):
     """
     Create prediction routes with dependencies.
     
     Args:
         model: The ML model instance
         audio_processor: AudioProcessor instance
-        model_latency_metric: Prometheus metric for latency tracking
-        auth_middleware: Authentication middleware instance (optional)
+        cloudwatch_metrics: CloudWatch metrics instance for tracking
         
     Returns:
         Blueprint with registered routes
     """
     
     @predict_bp.route('/predict', methods=['POST'])
-    @model_latency_metric
-    @auth_middleware.require_auth if auth_middleware else (lambda f: f)
+    @cloudwatch_metrics.track_latency('predict')
     def predict():
         """
         Predict pronunciation from audio file.
@@ -45,11 +43,6 @@ def create_prediction_routes(model, audio_processor, model_latency_metric, auth_
             JSON with transcription and metadata (including GOP if text provided)
         """
         logger.info(f"Received prediction request from {request.remote_addr}")
-        
-        # Log user info if authenticated
-        if hasattr(request, 'user_data'):
-            user_id = request.user_data.get('userId', 'unknown')
-            logger.info(f"Authenticated user: {user_id}")
         
         # Validate request
         if 'file' not in request.files:
@@ -115,9 +108,5 @@ def create_prediction_routes(model, audio_processor, model_latency_metric, auth_
                 "error": "Internal server error",
                 "status": "error"
             }), 500
-    
-    # Apply authentication middleware if provided
-    if auth_middleware:
-        predict = auth_middleware.require_auth(predict)
     
     return predict_bp

@@ -26,16 +26,16 @@ class Config:
     # Allowed audio file extensions
     ALLOWED_EXTENSIONS = {'wav', 'mp3', 'flac', 'ogg', 'm4a'}
     
-    # Prometheus Metrics Configuration
-    METRICS_BUCKETS: List[float] = [1.0, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0, float("inf")]
+    # CloudWatch Configuration
+    CLOUDWATCH_NAMESPACE = os.getenv('CLOUDWATCH_NAMESPACE', 'Lingulu/ML')
+    CLOUDWATCH_ENABLED = os.getenv('CLOUDWATCH_ENABLED', 'True').lower() == 'true'
+    
+    # AWS Configuration
+    AWS_REGION = os.getenv('AWS_REGION', 'ap-southeast-1')
     
     # Logging Configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    
-    # Authentication Configuration
-    AUTH_SERVICE_URL = os.getenv('AUTH_SERVICE_URL', 'http://localhost:8080')
-    AUTH_TIMEOUT = float(os.getenv('AUTH_TIMEOUT', '5.0'))
     
     @staticmethod
     def validate():
