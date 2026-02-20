@@ -107,50 +107,26 @@ class AudioProcessor:
             AudioTooLongError: If audio is too long
         """
         try:
-            # Read file into bytes
+            # Read and load audio in one go - minimal overhead
             audio_bytes = io.BytesIO(audio_file.read())
             
-            # Load with librosa using optimized parameters
-            logger.debug(f"Loading audio file: {audio_file.filename}")
+            # Fast audio loading with resampy (kaiser_fast)
+            speech_array, sr = librosa.load(
+                audio_bytes,
+                sr=self.sampling_rate,
+                mono=True,
+                res_type='kaiser_fast'
+            )
             
-            # Try fast resampling methods with fallback
-            # Priority: kaiser_fast (resampy) > scipy > default
-            try:
-                # Use res_type='kaiser_fast' for faster resampling (requires resampy)
-                speech_array, sr = librosa.load(
-                    audio_bytes,
-                    sr=self.sampling_rate,
-                    mono=True,
-                    res_type='kaiser_fast'
-                )
-            except (ImportError, TypeError) as e:
-                # Fallback to scipy if resampy not available
-                logger.debug(f"kaiser_fast not available ({e}), using scipy resampling")
-                audio_bytes.seek(0)  # Reset file pointer
-                speech_array, sr = librosa.load(
-                    audio_bytes,
-                    sr=self.sampling_rate,
-                    mono=True,
-                    res_type='scipy'
-                )
-            
-            # Validate duration
-            duration = len(speech_array) / sr
-            logger.debug(f"Audio duration: {duration:.2f}s")
-            
-            if duration > self.max_audio_length_seconds:
-                raise AudioTooLongError(
-                    f"Audio duration {duration:.2f}s exceeds "
-                    f"maximum {self.max_audio_length_seconds}s"
-                )
-            
+            # Quick validation
             if len(speech_array) == 0:
                 raise AudioProcessingError("Audio file is empty")
             
-            logger.info(
-                f"Successfully loaded audio: duration={duration:.2f}s, "
-                f"samples={len(speech_array)}"
-            )
+            duration = len(speech_array) / sr
+            if duration > self.max_audio_length_seconds:
+                raise AudioTooLongError(
+                    f"Audio duration {duration:.2f}s exceeds maximum {self.max_audio_length_seconds}s"
+                )
             
             return speech_array, int(sr)
             

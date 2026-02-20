@@ -42,61 +42,44 @@ def create_prediction_routes(model, audio_processor):
         Returns:
             JSON with transcription and metadata (including GOP if text provided)
         """
-        logger.info(f"Received prediction request from {request.remote_addr}")
-        
-        # Validate request
+        # Fast validation
         if 'file' not in request.files:
-            logger.warning("Request missing 'file' field")
             raise InvalidRequestError("No file provided. Please upload an audio file in 'file' field")
         
         audio_file = request.files['file']
         
-        # Check if filename is empty
         if audio_file.filename == '':
-            logger.warning("Empty filename in request")
             raise InvalidRequestError("No file selected")
         
         # Get optional reference text for GOP
         reference_text = request.form.get('text', '').strip()
         
-        if reference_text:
-            logger.debug(f"Reference text provided for GOP: '{reference_text}'")
-        
         try:
-            # Validate and load audio
-            logger.debug(f"Processing file: {audio_file.filename}")
+            # Fast audio loading and processing
             speech_array, sampling_rate = audio_processor.validate_and_load(audio_file)
             
-            # Run inference (with GOP if text provided)
+            # Run inference
             result = model.predict(
                 speech_array,
                 reference_text=reference_text if reference_text else None
             )
             
-            # Add status to response
+            # Build response quickly
             result['status'] = 'success'
             result['filename'] = audio_file.filename
             
             if reference_text:
                 result['reference_text'] = reference_text
             
-            logger.info(
-                f"Prediction successful: filename={audio_file.filename}, "
-                f"latency={result['latency_seconds']:.5f}s, "
-                f"gop_enabled={bool(reference_text and 'pronounciation_assessment' in result)}"
-            )
-            
             return jsonify(result), 200
             
         except LinguluMLException as e:
-            logger.warning(f"Client error: {e.message}")
             return jsonify({
                 "error": e.message,
                 "status": "error"
             }), e.status_code
             
         except RequestEntityTooLarge:
-            logger.warning("Request entity too large")
             return jsonify({
                 "error": "File too large",
                 "status": "error"

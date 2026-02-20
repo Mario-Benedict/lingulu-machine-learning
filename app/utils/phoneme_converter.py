@@ -172,8 +172,6 @@ class PhonemeConverter:
         # Cache result
         self._word_ipa_cache[cache_key] = ipa
         
-        logger.debug(f"Text '{text}' -> ARPABET: {arpabet} -> IPA: {ipa}")
-        
         return ipa
     
     def word_to_ipa(

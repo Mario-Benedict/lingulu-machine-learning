@@ -201,77 +201,57 @@ class Wav2Vec2PronunciationModel:
             raise ModelNotLoadedError("Model must be loaded before prediction")
         
         try:
-            logger.debug(f"Running inference on audio with {len(audio_array)} samples")
             start_time = time.perf_counter()
             
-            # Optimized preprocessing with minimal overhead
-            # Use inference_mode() instead of no_grad() for extra performance
-            # inference_mode() disables view tracking and is faster than no_grad()
+            # Fast preprocessing - no logging overhead
             with torch.inference_mode():
+                # Process audio directly
                 inputs = self.processor(
                     audio_array,
                     sampling_rate=self.sampling_rate,
                     return_tensors="pt",
-                    padding=False  # Disable padding for single input (faster)
+                    padding=False
                 )
                 
-                # Move inputs to device (non-blocking for speed on GPU)
                 input_values = inputs.input_values.to(self.device, non_blocking=True)
                 
-                # Inference with GPU optimization and mixed precision
+                # Model inference with mixed precision on GPU
                 if self.device.type == 'cuda':
-                    # Use automatic mixed precision for 2x speedup on GPU
                     with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
                         logits = self.model(input_values).logits
                 else:
                     logits = self.model(input_values).logits
-                
-                # Keep on GPU for GOP if needed, otherwise decode now
-                if reference_text and self.enable_gop and self.gop_calculator is not None and self.g2p_model is not None:
-                    # Keep logits on GPU for GOP calculation
-                    predicted_ids = torch.argmax(logits, dim=-1)
-                    transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
-                    
-                    # Calculate GOP with GPU-resident logits
-                    gop_start = time.perf_counter()
-                    
-                    # Get log probabilities for GOP - already on GPU
+            
+            # Decode transcription (happens once, outside inference_mode)
+            predicted_ids = torch.argmax(logits, dim=-1)
+            transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
+            
+            # GOP calculation if needed (separate context for clarity)
+            gop_result = None
+            if reference_text and self.enable_gop and self.gop_calculator and self.g2p_model:
+                gop_start = time.perf_counter()
+                try:
+                    # Calculate log probs outside inference_mode (already computed)
                     log_probs = torch.log_softmax(logits.squeeze(0), dim=-1)
                     
-                    try:
-                        # Calculate GOP scores with GPU acceleration
-                        sentence_score = self.gop_calculator.calculate_sentence_score(
-                            text=reference_text,
-                            log_probs=log_probs,
-                            tokenizer=self.processor.tokenizer,
-                            g2p_model=self.g2p_model,
-                            device=self.device
-                        )
+                    sentence_score = self.gop_calculator.calculate_sentence_score(
+                        text=reference_text,
+                        log_probs=log_probs,
+                        tokenizer=self.processor.tokenizer,
+                        g2p_model=self.g2p_model,
+                        device=self.device
+                    )
                         
-                        gop_latency = time.perf_counter() - gop_start
-                        gop_result = sentence_score.to_dict()
-                        gop_result['gop_latency_seconds'] = round(gop_latency, 5)
-                        
-                        logger.info(
-                            f"GOP calculated: avg score {sentence_score.average_score:.1f}% "
-                            f"in {gop_latency:.5f}s"
-                        )
-                    except Exception as e:
-                        logger.error(f"GOP calculation failed: {e}", exc_info=True)
-                        gop_result = {
-                            'error': 'GOP calculation failed',
-                            'details': str(e)
-                        }
-                        gop_latency = 0.0
-                else:
-                    # No GOP needed, just decode
-                    predicted_ids = torch.argmax(logits, dim=-1)
-                    transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
-                    gop_result = None
-                    gop_latency = 0.0
+                    gop_latency = time.perf_counter() - gop_start
+                    gop_result = sentence_score.to_dict()
+                    gop_result['gop_latency_seconds'] = round(gop_latency, 5)
+                except Exception as e:
+                    logger.error(f"GOP failed: {str(e)[:100]}")
+                    gop_result = {'error': 'GOP calculation failed', 'details': str(e)}
             
             latency = time.perf_counter() - start_time
             
+            # Build result quickly
             result = {
                 "transcription": transcription,
                 "latency_seconds": round(latency, 5),
@@ -279,22 +259,15 @@ class Wav2Vec2PronunciationModel:
                 "audio_duration_seconds": round(len(audio_array) / self.sampling_rate, 2)
             }
             
-            # Add GOP results if calculated
+            # Add GOP if available
             if reference_text:
-                if gop_result is not None:
+                if gop_result:
                     result['pronounciation_assessment'] = gop_result
-                elif not self.enable_gop or self.gop_calculator is None or self.g2p_model is None:
-                    # GOP requested but not available
-                    logger.debug(f"GOP requested but not available (enable_gop={self.enable_gop}, gop_calculator={self.gop_calculator is not None}, g2p_model={self.g2p_model is not None})")
+                else:
                     result['pronounciation_assessment'] = {
-                        'error': 'GOP not enabled. Install g2p-en to enable GOP scoring.',
+                        'error': 'GOP not enabled',
                         'gop_status': 'disabled'
                     }
-            
-            logger.info(
-                f"Inference completed in {latency:.5f}s. "
-                f"Transcription length: {len(transcription)} chars"
-            )
             
             return result
             

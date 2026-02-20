@@ -341,13 +341,11 @@ class GOPCalculator:
         Returns:
             SentenceScore object with all scores
         """
-        logger.debug(f"Calculating GOP for text: '{text}'")
-        
         # Ensure log_probs is on specified device
         if device is not None and log_probs.device != device:
             log_probs = log_probs.to(device)
         
-        # Convert text to IPA phonemes (batch process all words at once)
+        # Convert text to IPA phonemes (cached)
         ipa_phonemes = self.phoneme_converter.text_to_ipa(
             text,
             g2p_model,
@@ -355,23 +353,13 @@ class GOPCalculator:
         )
         
         if not ipa_phonemes:
-            logger.warning(f"No phonemes extracted from text: '{text}'")
-            return SentenceScore(
-                text=text,
-                average_score=0.0,
-                words=[]
-            )
+            return SentenceScore(text=text, average_score=0.0, words=[])
         
         # Calculate raw GOP scores
         gop_raw = self.calculate_gop_scores(log_probs, ipa_phonemes, tokenizer)
         
         if not gop_raw:
-            logger.warning("No GOP scores calculated")
-            return SentenceScore(
-                text=text,
-                average_score=0.0,
-                words=[]
-            )
+            return SentenceScore(text=text, average_score=0.0, words=[])
         
         # Normalize to percentage
         gop_normalized = self.normalize_gop_to_percentage(gop_raw)
@@ -384,15 +372,7 @@ class GOPCalculator:
         )
         
         # Calculate sentence average
-        if word_scores:
-            sentence_avg = sum(w.score for w in word_scores) / len(word_scores)
-        else:
-            sentence_avg = 0.0
-        
-        logger.info(
-            f"GOP calculated: {len(word_scores)} words, "
-            f"avg score: {sentence_avg:.1f}%"
-        )
+        sentence_avg = sum(w.score for w in word_scores) / len(word_scores) if word_scores else 0.0
         
         return SentenceScore(
             text=text,
