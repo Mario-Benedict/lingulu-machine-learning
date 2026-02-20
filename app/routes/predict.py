@@ -4,9 +4,9 @@ Prediction endpoint for audio transcription.
 from flask import Blueprint, request, jsonify
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from utils.logger import get_logger
-from utils.metrics import track_latency
-from utils.exceptions import (
+from app.utils.logger import get_logger
+from app.utils.metrics import track_latency
+from app.utils.exceptions import (
     LinguluMLException,
     InvalidRequestError
 )

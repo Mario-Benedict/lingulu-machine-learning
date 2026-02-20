@@ -8,9 +8,9 @@ import numpy as np
 from typing import Dict, Any, Optional
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
-from utils.logger import get_logger
-from utils.exceptions import ModelInferenceError, ModelNotLoadedError
-from utils.gop_calculator import GOPCalculator
+from app.utils.logger import get_logger
+from app.utils.exceptions import ModelInferenceError, ModelNotLoadedError
+from app.utils.gop_calculator import GOPCalculator
 
 logger = get_logger(__name__)
 

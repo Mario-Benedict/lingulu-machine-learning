@@ -56,20 +56,20 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 &
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser
 
-# Set working directory
-WORKDIR /app
+# Set working directory to parent of app package
+WORKDIR /workspace
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code (only necessary files)
-COPY --chown=appuser:appuser . .
+# Copy application code to /workspace/app/
+COPY --chown=appuser:appuser . ./app/
 
 # Remove any unnecessary files that might have been copied
-RUN find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
-    find . -type f -name "*.pyc" -delete && \
-    find . -type f -name "*.pyo" -delete
+RUN find ./app -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find ./app -type f -name "*.pyc" -delete && \
+    find ./app -type f -name "*.pyo" -delete
 
 # Switch to non-root user
 USER appuser
@@ -78,11 +78,12 @@ USER appuser
 ENV PYTHONUNBUFFERED=1 \
     FLASK_ENV=production \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/workspace \
     CUDA_VISIBLE_DEVICES=0 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
-    TORCH_HOME=/app/.cache/torch
+    TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+    TORCH_HOME=/workspace/.cache/torch
 
 # Expose port
 EXPOSE 5000
@@ -93,4 +94,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Run application with gunicorn (optimized for GPU workload)
 # Using 1 worker to avoid GPU memory duplication, with more threads for concurrent requests
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "16", "--worker-class", "gthread", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "app:create_app()"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "16", "--worker-class", "gthread", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "app.app:create_app()"]

@@ -7,8 +7,8 @@ import numpy as np
 from typing import List, Dict, Tuple, Any, Optional
 from dataclasses import dataclass, asdict
 
-from utils.logger import get_logger
-from utils.phoneme_converter import PhonemeConverter
+from app.utils.logger import get_logger
+from app.utils.phoneme_converter import PhonemeConverter
 
 logger = get_logger(__name__)
 

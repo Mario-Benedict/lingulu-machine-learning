@@ -4,8 +4,8 @@ Provides p50, p90, p99 latency metrics.
 """
 from flask import Blueprint, jsonify
 
-from utils.metrics import get_metrics_tracker
-from utils.logger import get_logger
+from app.utils.metrics import get_metrics_tracker
+from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

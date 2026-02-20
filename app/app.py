@@ -17,11 +17,11 @@ except ImportError:
     # python-dotenv not installed, skip
     pass
 
-from config import get_config
-from utils.logger import setup_logger, get_logger
-from models import Wav2Vec2PronunciationModel
-from utils import AudioProcessor
-from routes import create_health_routes, create_prediction_routes, create_metrics_routes
+from app.config import get_config
+from app.utils.logger import setup_logger, get_logger
+from app.models import Wav2Vec2PronunciationModel
+from app.utils import AudioProcessor
+from app.routes import create_health_routes, create_prediction_routes, create_metrics_routes
 
 
 def create_app() -> Flask:

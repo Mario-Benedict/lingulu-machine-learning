@@ -1,8 +1,8 @@
 """
 Utility modules initialization.
 """
-from utils.logger import setup_logger, get_logger
-from utils.exceptions import (
+from app.utils.logger import setup_logger, get_logger
+from app.utils.exceptions import (
     LinguluMLException,
     AudioProcessingError,
     InvalidAudioFormatError,
@@ -12,15 +12,15 @@ from utils.exceptions import (
     ModelNotLoadedError,
     InvalidRequestError
 )
-from utils.audio_processor import AudioProcessor
-from utils.phoneme_converter import PhonemeConverter
-from utils.gop_calculator import (
+from app.utils.audio_processor import AudioProcessor
+from app.utils.phoneme_converter import PhonemeConverter
+from app.utils.gop_calculator import (
     GOPCalculator,
     PhonemeScore,
     WordScore,
     SentenceScore
 )
-from utils.metrics import get_metrics_tracker, track_latency, MetricsTracker
+from app.utils.metrics import get_metrics_tracker, track_latency, MetricsTracker
 
 __all__ = [
     'setup_logger',
