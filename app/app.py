@@ -4,7 +4,8 @@ A production-ready Flask application for pronunciation prediction using Wav2Vec2
 """
 import os
 from pathlib import Path
-from flask import Flask
+from flask import Flask, request
+from flask_cors import CORS
 
 # Load environment variables from .env file if it exists
 try:
@@ -71,6 +72,25 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(config)
     
+    # Configure CORS - only allow specific origins
+    # Using explicit configuration with more permissive settings for development
+    cors_config = {
+        "origins": [
+            "http://localhost:5173",
+            "https://localhost:5173",
+            "https://lingulu.site",
+            "https://www.lingulu.site"
+        ],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+        "supports_credentials": True,
+        "expose_headers": ["Content-Type", "X-Request-Id"],
+        "max_age": 3600
+    }
+    
+    CORS(app, resources={r"/api/*": cors_config})
+    logger.info(f"✅ CORS configured - Allowed origins: {cors_config['origins']}")
+    
     # Configure max content length for file uploads
     app.config['MAX_CONTENT_LENGTH'] = config.MAX_FILE_SIZE_BYTES
     
@@ -103,6 +123,30 @@ def create_app() -> Flask:
     
     metrics_routes = create_metrics_routes()
     app.register_blueprint(metrics_routes)
+    
+    # Add after_request handler to ensure CORS headers are always present
+    @app.after_request
+    def after_request(response):
+        """Add CORS headers to response."""
+        origin = request.environ.get('HTTP_ORIGIN', '')
+        
+        # List of allowed origins
+        allowed_origins = [
+            'http://localhost:5173',
+            'https://localhost:5173',
+            'https://lingulu.site',
+            'https://www.lingulu.site'
+        ]
+        
+        # Check if origin is allowed
+        if origin in allowed_origins:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Max-Age'] = '3600'
+        
+        return response
     
     logger.info("Application initialized successfully")
     
