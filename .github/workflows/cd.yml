@@ -1,22 +1,13 @@
 name: CD - Deploy to Hugging Face Spaces
 
 on:
-  # Trigger after CI workflow completes successfully
+  # Only trigger after CI workflow completes successfully
   workflow_run:
     workflows: ["CI - Tests and Validation"]
     types:
       - completed
     branches:
       - main
-  
-  # Also trigger on specific path changes
-  push:
-    branches:
-      - main
-    paths:
-      - 'app/**'
-      - 'requirements-prod.txt'
-      - '.github/workflows/deploy-hf.yml'
   
   # Allow manual trigger
   workflow_dispatch:
@@ -31,6 +22,7 @@ jobs:
         if: github.event.workflow_run.conclusion != 'success'
         run: |
           echo "❌ CI workflow did not succeed. Deployment cancelled."
+          echo "CI conclusion: ${{ github.event.workflow_run.conclusion }}"
           exit 1
       
       - name: CI passed
@@ -41,11 +33,25 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: [check-ci]
+    # Deploy if: CI check passed OR manual trigger
     if: |
       always() &&
-      (needs.check-ci.result == 'success' || github.event_name != 'workflow_run')
+      (needs.check-ci.result == 'success' || github.event_name == 'workflow_dispatch')
     
     steps:
+      - name: Deployment Info
+        run: |
+          echo "🚀 Starting Deployment"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Trigger: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "Triggered by: CI workflow completion"
+            echo "CI Status: ${{ github.event.workflow_run.conclusion }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Triggered by: Manual dispatch"
+          fi
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -65,19 +71,19 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli login --token $HF_TOKEN
+          hf auth login --token $HF_TOKEN
       
       - name: Prepare deployment files
         env:
-          FLASK_HOST: ${{ secrets.FLASK_HOST || '0.0.0.0' }}
-          FLASK_PORT: ${{ secrets.FLASK_PORT || '5000' }}
-          FLASK_ENV: ${{ secrets.FLASK_ENV || 'production' }}
-          FLASK_DEBUG: ${{ secrets.FLASK_DEBUG || 'False' }}
-          MODEL_ID: ${{ secrets.MODEL_ID || 'marx90/lingulu_wav2vec2_pronounciation_finetune' }}
-          SAMPLING_RATE: ${{ secrets.SAMPLING_RATE || '16000' }}
-          MAX_AUDIO_LENGTH_SECONDS: ${{ secrets.MAX_AUDIO_LENGTH_SECONDS || '60' }}
-          MAX_FILE_SIZE_MB: ${{ secrets.MAX_FILE_SIZE_MB || '10' }}
-          LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'INFO' }}
+          FLASK_HOST: ${{ secrets.FLASK_HOST }}
+          FLASK_PORT: ${{ secrets.FLASK_PORT }}
+          FLASK_ENV: ${{ secrets.FLASK_ENV }}
+          FLASK_DEBUG: ${{ secrets.FLASK_DEBUG }}
+          MODEL_ID: ${{ secrets.MODEL_ID }}
+          SAMPLING_RATE: ${{ secrets.SAMPLING_RATE }}
+          MAX_AUDIO_LENGTH_SECONDS: ${{ secrets.MAX_AUDIO_LENGTH_SECONDS }}
+          MAX_FILE_SIZE_MB: ${{ secrets.MAX_FILE_SIZE_MB }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
         run: |
           echo "📦 Preparing files for Hugging Face Spaces deployment..."
           
