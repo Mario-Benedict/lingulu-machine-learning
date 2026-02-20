@@ -185,7 +185,7 @@ class Wav2Vec2PronunciationModel:
             with torch.no_grad():
                 if self.device.type == 'cuda':
                     # Use automatic mixed precision for 2x speedup on GPU
-                    with torch.cuda.amp.autocast():
+                    with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
                         logits = self.model(input_values).logits
                 else:
                     logits = self.model(input_values).logits
@@ -198,7 +198,7 @@ class Wav2Vec2PronunciationModel:
             
             result = {
                 "transcription": transcription,
-                "latency_seconds": round(latency, 4),
+                "latency_seconds": round(latency, 5),
                 "audio_samples": len(audio_array),
                 "audio_duration_seconds": round(len(audio_array) / self.sampling_rate, 2)
             }

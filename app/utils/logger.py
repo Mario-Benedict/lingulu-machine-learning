@@ -7,6 +7,15 @@ import sys
 from typing import Optional
 
 
+class FlushingStreamHandler(logging.StreamHandler):
+    """StreamHandler that flushes after every emit for container visibility."""
+    
+    def emit(self, record):
+        """Emit a record and flush immediately."""
+        super().emit(record)
+        self.flush()
+
+
 def setup_logger(
     name: str,
     level: str = 'INFO',
@@ -30,11 +39,15 @@ def setup_logger(
         return logger
     
     # Set level
-    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    log_level = getattr(logging, level.upper(), logging.INFO)
+    logger.setLevel(log_level)
     
-    # Create console handler
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(getattr(logging, level.upper(), logging.INFO))
+    # Prevent propagation to root logger to avoid duplicates
+    logger.propagate = False
+    
+    # Create flushing console handler with explicit stdout
+    handler = FlushingStreamHandler(sys.stdout)
+    handler.setLevel(log_level)
     
     # Create formatter
     if log_format is None:
@@ -51,7 +64,7 @@ def setup_logger(
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Get a logger instance.
+    Get an existing logger or create a new one with default settings.
     
     Args:
         name: Logger name
@@ -59,4 +72,10 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Logger instance
     """
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    
+    # If logger has no handlers, set it up with defaults
+    if not logger.handlers:
+        logger = setup_logger(name)
+    
+    return logger

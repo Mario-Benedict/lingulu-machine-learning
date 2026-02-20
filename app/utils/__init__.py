@@ -1,7 +1,7 @@
 """
 Utility modules initialization.
 """
-from app.utils.logger import setup_logger, get_logger
+from app.utils.logger import setup_logger, get_logger, FlushingStreamHandler
 from app.utils.exceptions import (
     LinguluMLException,
     AudioProcessingError,
@@ -25,6 +25,7 @@ from app.utils.metrics import get_metrics_tracker, track_latency, MetricsTracker
 __all__ = [
     'setup_logger',
     'get_logger',
+    'FlushingStreamHandler',
     'LinguluMLException',
     'AudioProcessingError',
     'InvalidAudioFormatError',

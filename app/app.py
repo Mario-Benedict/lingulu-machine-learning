@@ -34,12 +34,38 @@ def create_app() -> Flask:
     # Load configuration
     config = get_config()
     
-    # Setup logging
+    # Setup logging with stdout for container visibility
+    import logging
+    import sys
+    from app.utils.logger import FlushingStreamHandler
+    
+    # Configure root logger for gunicorn compatibility
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, config.LOG_LEVEL.upper(), logging.INFO))
+    
+    # Remove existing handlers to avoid duplicates
+    root_logger.handlers = []
+    
+    # Create flushing stdout handler for container logs
+    console_handler = FlushingStreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, config.LOG_LEVEL.upper(), logging.INFO))
+    formatter = logging.Formatter(config.LOG_FORMAT)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    # Setup app logger
     setup_logger('app', level=config.LOG_LEVEL, log_format=config.LOG_FORMAT)
     logger = get_logger(__name__)
     
+    logger.info("="*60)
     logger.info("Starting Lingulu ML Application")
     logger.info(f"Environment: {os.getenv('FLASK_ENV', 'production')}")
+    logger.info(f"Log Level: {config.LOG_LEVEL}")
+    logger.info("="*60)
+    
+    # Force flush to ensure logs appear in container stdout immediately
+    sys.stdout.flush()
+    sys.stderr.flush()
     
     # Create Flask app
     app = Flask(__name__)
