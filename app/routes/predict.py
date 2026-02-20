@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.utils.logger import get_logger
+from app.utils.metrics import track_latency
 from app.utils.exceptions import (
     LinguluMLException,
     InvalidRequestError
@@ -15,21 +16,20 @@ logger = get_logger(__name__)
 predict_bp = Blueprint('predict', __name__, url_prefix='/api/model')
 
 
-def create_prediction_routes(model, audio_processor, cloudwatch_metrics):
+def create_prediction_routes(model, audio_processor):
     """
     Create prediction routes with dependencies.
     
     Args:
         model: The ML model instance
         audio_processor: AudioProcessor instance
-        cloudwatch_metrics: CloudWatch metrics instance for tracking
         
     Returns:
         Blueprint with registered routes
     """
     
     @predict_bp.route('/predict', methods=['POST'])
-    @cloudwatch_metrics.track_latency('predict')
+    @track_latency
     def predict():
         """
         Predict pronunciation from audio file.

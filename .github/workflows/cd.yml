@@ -1,0 +1,307 @@
+name: CD - Deploy to Hugging Face Spaces
+
+on:
+  # Trigger after CI workflow completes successfully
+  workflow_run:
+    workflows: ["CI - Tests and Validation"]
+    types:
+      - completed
+    branches:
+      - main
+  
+  # Also trigger on specific path changes
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+      - 'requirements-prod.txt'
+      - '.github/workflows/deploy-hf.yml'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  # Check if CI was successful (only for workflow_run trigger)
+  check-ci:
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI workflow result
+        if: github.event.workflow_run.conclusion != 'success'
+        run: |
+          echo "❌ CI workflow did not succeed. Deployment cancelled."
+          exit 1
+      
+      - name: CI passed
+        run: |
+          echo "✅ CI workflow passed successfully"
+          echo "Proceeding with deployment..."
+  
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [check-ci]
+    if: |
+      always() &&
+      (needs.check-ci.result == 'success' || github.event_name != 'workflow_run')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better commit messages
+          lfs: true  # Enable Git LFS if needed
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Hugging Face CLI
+        run: |
+          pip install --upgrade huggingface_hub
+      
+      - name: Configure Hugging Face CLI
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli login --token $HF_TOKEN
+      
+      - name: Prepare deployment files
+        env:
+          FLASK_HOST: ${{ secrets.FLASK_HOST || '0.0.0.0' }}
+          FLASK_PORT: ${{ secrets.FLASK_PORT || '5000' }}
+          FLASK_ENV: ${{ secrets.FLASK_ENV || 'production' }}
+          FLASK_DEBUG: ${{ secrets.FLASK_DEBUG || 'False' }}
+          MODEL_ID: ${{ secrets.MODEL_ID || 'marx90/lingulu_wav2vec2_pronounciation_finetune' }}
+          SAMPLING_RATE: ${{ secrets.SAMPLING_RATE || '16000' }}
+          MAX_AUDIO_LENGTH_SECONDS: ${{ secrets.MAX_AUDIO_LENGTH_SECONDS || '60' }}
+          MAX_FILE_SIZE_MB: ${{ secrets.MAX_FILE_SIZE_MB || '10' }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'INFO' }}
+        run: |
+          echo "📦 Preparing files for Hugging Face Spaces deployment..."
+          
+          # Create temporary directory for deployment
+          mkdir -p hf_space
+          
+          # Copy app folder contents
+          echo "  - Copying app folder..."
+          cp -r app/* hf_space/
+          
+          # Copy requirements
+          echo "  - Copying requirements..."
+          cp requirements-prod.txt hf_space/requirements.txt
+          
+          # Create .env file from GitHub Secrets
+          echo "  - Creating production environment configuration..."
+          cat > hf_space/.env << EOF
+          # Production Environment Configuration
+          # Auto-generated from GitHub Secrets
+          
+          FLASK_HOST=${FLASK_HOST}
+          FLASK_PORT=${FLASK_PORT}
+          FLASK_ENV=${FLASK_ENV}
+          FLASK_DEBUG=${FLASK_DEBUG}
+          
+          MODEL_ID=${MODEL_ID}
+          SAMPLING_RATE=${SAMPLING_RATE}
+          
+          MAX_AUDIO_LENGTH_SECONDS=${MAX_AUDIO_LENGTH_SECONDS}
+          MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB}
+          
+          LOG_LEVEL=${LOG_LEVEL}
+          EOF
+          
+          echo "    ✓ Environment configuration created"
+          echo "    - Using MODEL_ID: ${MODEL_ID}"
+          echo "    - Max file size: ${MAX_FILE_SIZE_MB}MB"
+          echo "    - Max audio length: ${MAX_AUDIO_LENGTH_SECONDS}s"
+          
+          # Create README.md for Hugging Face Spaces
+          echo "  - Creating README with metadata..."
+          cat > hf_space/README.md << 'EOF'
+          ---
+          title: Lingulu ML API
+          emoji: 🎤
+          colorFrom: blue
+          colorTo: purple
+          sdk: docker
+          pinned: false
+          license: mit
+          app_port: 5000
+          ---
+          
+          # Lingulu Machine Learning API
+          
+          Production-ready pronunciation assessment API powered by Wav2Vec2.
+          
+          ## Features
+          
+          - 🎯 Accurate pronunciation scoring using wav2vec2
+          - 📊 Detailed phoneme-level feedback with GOP (Goodness of Pronunciation)
+          - ⚡ GPU-accelerated inference
+          - 📈 Real-time metrics monitoring (p50, p90, p99 latency)
+          - 🔒 Production-grade error handling
+          
+          ## API Endpoints
+          
+          ### Health Check
+          ```
+          GET /api/model/health
+          ```
+          
+          ### Predict
+          ```
+          POST /api/model/predict
+          Content-Type: multipart/form-data
+          
+          Fields:
+          - file: audio file (wav, mp3, flac, ogg, m4a)
+          - text: reference text for pronunciation assessment (optional)
+          ```
+          
+          ### Metrics
+          ```
+          GET /api/metrics
+          ```
+          
+          Returns latency metrics including p50, p90, p99 percentiles.
+          
+          ## Usage Example
+          
+          ```python
+          import requests
+          
+          # Upload audio for transcription
+          with open('audio.wav', 'rb') as f:
+              response = requests.post(
+                  'https://YOUR-SPACE.hf.space/api/model/predict',
+                  files={'file': f}
+              )
+          print(response.json())
+          
+          # With pronunciation assessment
+          with open('audio.wav', 'rb') as f:
+              response = requests.post(
+                  'https://YOUR-SPACE.hf.space/api/model/predict',
+                  files={'file': f},
+                  data={'text': 'hello world'}
+              )
+          print(response.json())
+          
+          # Check metrics
+          response = requests.get('https://YOUR-SPACE.hf.space/api/metrics')
+          print(response.json())
+          ```
+          
+          ## Monitoring
+          
+          The API tracks latency metrics that can be accessed via `/api/metrics` endpoint:
+          - `latency_p50_ms`: Median latency
+          - `latency_p90_ms`: 90th percentile latency
+          - `latency_p99_ms`: 99th percentile latency
+          - `total_requests`: Total number of requests processed
+          - `error_rate`: Percentage of failed requests
+          
+          ## Model
+          
+          Uses fine-tuned Wav2Vec2 model: `marx90/lingulu_wav2vec2_pronounciation_finetune`
+          
+          ## Technical Details
+          
+          - **Framework**: Flask with Gunicorn
+          - **ML Model**: Wav2Vec2 with CTC head
+          - **Audio Processing**: librosa + soundfile
+          - **GPU Support**: CUDA 12.1 with cuDNN 8
+          - **Container**: Docker with NVIDIA runtime
+          
+          ---
+          
+          Built with ❤️ by Lingulu Team
+          EOF
+          
+          # Copy Dockerfile
+          echo "  - Copying Dockerfile..."
+          cp app/Dockerfile hf_space/Dockerfile
+          
+          echo "✅ Deployment files prepared successfully"
+          echo ""
+          echo "📁 Files to deploy:"
+          ls -la hf_space/
+      
+      - name: Deploy to Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ secrets.HF_SPACE }}
+        run: |
+          echo "🚀 Starting deployment to Hugging Face Spaces..."
+          echo "📍 Target Space: $HF_SPACE"
+          
+          cd hf_space
+          
+          # Initialize git repository
+          echo "  - Initializing git..."
+          git init
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions Bot"
+          
+          # Add Hugging Face Space as remote
+          echo "  - Configuring remote..."
+          git remote add space https://huggingface.co/spaces/$HF_SPACE 2>/dev/null || \
+          git remote set-url space https://huggingface.co/spaces/$HF_SPACE
+          
+          # Pull existing content (if any)
+          echo "  - Syncing with existing space..."
+          git pull space main --allow-unrelated-histories 2>/dev/null || echo "    (No existing content)"
+          
+          # Stage all files
+          echo "  - Staging files..."
+          git add .
+          
+          # Create commit message
+          COMMIT_MSG="🚀 Deploy from GitHub Actions - $(date '+%Y-%m-%d %H:%M:%S')"
+          if [ -n "$GITHUB_SHA" ]; then
+            COMMIT_MSG="$COMMIT_MSG | Commit: ${GITHUB_SHA:0:7}"
+          fi
+          
+          echo "  - Committing changes..."
+          git commit -m "$COMMIT_MSG" || echo "    (No changes to commit)"
+          
+          # Push to Hugging Face Spaces
+          echo "  - Pushing to Hugging Face..."
+          git push https://oauth:$HF_TOKEN@huggingface.co/spaces/$HF_SPACE main --force
+          
+          echo ""
+          echo "✅ Deployment completed successfully!"
+          echo "📍 Space URL: https://huggingface.co/spaces/$HF_SPACE"
+          echo "🌐 API URL: https://${HF_SPACE//\//-}.hf.space"
+      
+      - name: Verify deployment
+        env:
+          HF_SPACE: ${{ secrets.HF_SPACE }}
+        run: |
+          echo ""
+          echo "🔍 Verifying deployment..."
+          
+          # Wait for space to register changes
+          sleep 5
+          
+          # Check if space exists
+          SPACE_URL="https://huggingface.co/spaces/$HF_SPACE"
+          API_URL="https://${HF_SPACE//\//-}.hf.space"
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 Deployment Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "🏠 Space:       $SPACE_URL"
+          echo "🌐 API:         $API_URL"
+          echo "📈 Health:      $API_URL/api/model/health"
+          echo "📊 Metrics:     $API_URL/api/metrics"
+          echo "📝 Predict:     $API_URL/api/model/predict"
+          echo ""
+          echo "⚠️  Note: GPU spaces may take 5-10 minutes to build and start"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "✅ Deployment workflow completed successfully!"

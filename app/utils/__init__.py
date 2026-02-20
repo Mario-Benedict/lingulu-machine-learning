@@ -20,6 +20,7 @@ from app.utils.gop_calculator import (
     WordScore,
     SentenceScore
 )
+from app.utils.metrics import get_metrics_tracker, track_latency, MetricsTracker
 
 __all__ = [
     'setup_logger',
@@ -38,4 +39,7 @@ __all__ = [
     'PhonemeScore',
     'WordScore',
     'SentenceScore',
+    'get_metrics_tracker',
+    'track_latency',
+    'MetricsTracker',
 ]

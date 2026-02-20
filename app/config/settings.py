@@ -26,13 +26,6 @@ class Config:
     # Allowed audio file extensions
     ALLOWED_EXTENSIONS = {'wav', 'mp3', 'flac', 'ogg', 'm4a'}
     
-    # CloudWatch Configuration
-    CLOUDWATCH_NAMESPACE = os.getenv('CLOUDWATCH_NAMESPACE', 'Lingulu/ML')
-    CLOUDWATCH_ENABLED = os.getenv('CLOUDWATCH_ENABLED', 'True').lower() == 'true'
-    
-    # AWS Configuration
-    AWS_REGION = os.getenv('AWS_REGION', 'ap-southeast-1')
-    
     # Logging Configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'

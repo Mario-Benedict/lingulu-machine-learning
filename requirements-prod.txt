@@ -25,6 +25,7 @@ tokenizers==0.22.2
 boto3==1.36.19
 
 # Minimal utilities only
+python-dotenv==1.0.1
 tqdm==4.67.3
 regex==2026.1.15
 PyYAML==6.0.3

@@ -8,6 +8,14 @@ services:
     container_name: lingulu-ml-app
     ports:
       - "5000:5000"
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     environment:
       # Flask Configuration
       - FLASK_ENV=production
@@ -20,17 +28,10 @@ services:
       - SAMPLING_RATE=16000
       - MAX_AUDIO_LENGTH_SECONDS=60
       - MAX_FILE_SIZE_MB=10
-      
-      # AWS CloudWatch Configuration
-      - AWS_REGION=ap-southeast-1
-      - CLOUDWATCH_NAMESPACE=Lingulu/ML
-      - CLOUDWATCH_ENABLED=true
-      # AWS credentials (use IAM role in production)
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     volumes:
-      # Cache HuggingFace models to avoid re-downloading
-      - huggingface_cache:/home/appuser/.cache/huggingface
+      # Cache HuggingFace models and PyTorch to avoid re-downloading
+      - huggingface_cache:/app/.cache/huggingface
+      - torch_cache:/app/.cache/torch
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/model/health')"]
       interval: 30s
@@ -43,3 +44,4 @@ services:
 
 volumes:
   huggingface_cache:
+  torch_cache:

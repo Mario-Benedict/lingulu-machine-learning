@@ -3,14 +3,25 @@ Lingulu Machine Learning API
 A production-ready Flask application for pronunciation prediction using Wav2Vec2.
 """
 import os
+from pathlib import Path
 from flask import Flask
+
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    env_file = Path(__file__).parent / '.env'
+    if env_file.exists():
+        load_dotenv(env_file)
+        print(f"✓ Loaded environment variables from {env_file}")
+except ImportError:
+    # python-dotenv not installed, skip
+    pass
 
 from app.config import get_config
 from app.utils.logger import setup_logger, get_logger
 from app.models import Wav2Vec2PronunciationModel
 from app.utils import AudioProcessor
-from app.middleware import setup_cloudwatch_metrics
-from app.routes import create_health_routes, create_prediction_routes
+from app.routes import create_health_routes, create_prediction_routes, create_metrics_routes
 
 
 def create_app() -> Flask:
@@ -37,13 +48,6 @@ def create_app() -> Flask:
     # Configure max content length for file uploads
     app.config['MAX_CONTENT_LENGTH'] = config.MAX_FILE_SIZE_BYTES
     
-    # Setup CloudWatch metrics
-    cloudwatch_metrics = setup_cloudwatch_metrics(
-        namespace=config.CLOUDWATCH_NAMESPACE,
-        enabled=config.CLOUDWATCH_ENABLED
-    )
-    logger.info("CloudWatch metrics configured successfully")
-    
     # Initialize components
     logger.info("Initializing ML model...")
     model = Wav2Vec2PronunciationModel(
@@ -68,8 +72,11 @@ def create_app() -> Flask:
     health_routes = create_health_routes(model)
     app.register_blueprint(health_routes)
     
-    prediction_routes = create_prediction_routes(model, audio_processor, cloudwatch_metrics)
+    prediction_routes = create_prediction_routes(model, audio_processor)
     app.register_blueprint(prediction_routes)
+    
+    metrics_routes = create_metrics_routes()
+    app.register_blueprint(metrics_routes)
     
     logger.info("Application initialized successfully")
     
