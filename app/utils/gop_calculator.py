@@ -82,7 +82,7 @@ class GOPCalculator:
         blank_id: int
     ) -> List[List[int]]:
         """
-        Perform CTC forced alignment with GPU acceleration.
+        Perform CTC forced alignment with full GPU acceleration.
         
         Args:
             log_probs: Log probabilities tensor (T, V) - can be on GPU
@@ -107,7 +107,7 @@ class GOPCalculator:
         blank_scores = log_probs[:, blank_id]  # (T,)
         target_scores = log_probs[:, target_ids_tensor]  # (T, N)
         
-        # Forward pass with vectorized operations
+        # Forward pass with fully vectorized operations (stay on GPU)
         for t in range(T):
             # Blank transition (vectorized)
             trellis[t + 1, 0] = trellis[t, 0] + blank_scores[t]
@@ -117,25 +117,26 @@ class GOPCalculator:
             move = trellis[t, 0:N] + target_scores[t]   # (N,)
             trellis[t + 1, 1:N+1] = torch.maximum(stay, move)
         
-        # Backtrack to find alignment (move to CPU only for this part)
-        trellis_cpu = trellis.cpu()
-        log_probs_cpu = log_probs.cpu()
-        
+        # Backtrack to find alignment (optimized - only transfer minimal data to CPU)
         t, n = T, N
         alignment: list[list[int]] = [[] for _ in range(N)]
         
-        while t > 0 and n >= 0:
-            if n > 0:
-                # Check if we emitted phoneme at this step
-                move_score = trellis_cpu[t - 1, n - 1] + log_probs_cpu[t - 1, target_ids[n - 1]]
-                if torch.abs(move_score - trellis_cpu[t, n]) < 1e-6:
-                    alignment[n - 1].append(t - 1)
-                    t -= 1
-                    n -= 1
-                    continue
-            
-            # Otherwise, we emitted blank
-            t -= 1
+        # Keep trellis on GPU, only move values when needed
+        with torch.inference_mode():
+            while t > 0 and n >= 0:
+                if n > 0:
+                    # Check if we emitted phoneme at this step (compute on GPU)
+                    move_score = trellis[t - 1, n - 1] + log_probs[t - 1, target_ids[n - 1]]
+                    diff = torch.abs(move_score - trellis[t, n])
+                    
+                    if diff.item() < 1e-6:
+                        alignment[n - 1].append(t - 1)
+                        t -= 1
+                        n -= 1
+                        continue
+                
+                # Otherwise, we emitted blank
+                t -= 1
         
         # Reverse alignments (they were built backwards)
         return [list(reversed(a)) for a in alignment]
@@ -147,7 +148,7 @@ class GOPCalculator:
         tokenizer
     ) -> List[float]:
         """
-        Calculate GOP scores for phonemes with GPU acceleration.
+        Calculate GOP scores for phonemes with full GPU acceleration.
         
         Args:
             log_probs: Log probabilities from model (T, V) - can be on GPU
@@ -189,41 +190,38 @@ class GOPCalculator:
             logger.error(f"CTC alignment failed: {e}", exc_info=True)
             return [-5.0] * len(phoneme_ids)
         
-        # Vectorized GOP calculation
+        # Fully vectorized GOP calculation (stay on GPU)
         gop_scores = []
         phoneme_ids_tensor = torch.tensor(phoneme_ids, dtype=torch.long, device=device)
         
-        for pid_idx, (pid, frames) in enumerate(zip(phoneme_ids, alignment)):
-            if not frames:
-                # No frames aligned to this phoneme
-                gop_scores.append(-5.0)
-                logger.debug(f"No alignment for phoneme ID {pid}")
-                continue
-            
-            # Get all frames at once (vectorized)
-            frame_indices = torch.tensor(frames, dtype=torch.long, device=device)
-            frame_probs = log_probs[frame_indices]  # (n_frames, V)
-            
-            # Get target scores
-            target_scores = frame_probs[:, pid]  # (n_frames,)
-            
-            # Get top 2 scores per frame (vectorized)
-            top2_values, top2_indices = torch.topk(frame_probs, min(2, frame_probs.shape[1]), dim=-1)
-            
-            # Calculate competitor scores (vectorized)
-            is_target_top = (top2_indices[:, 0] == pid)
-            competitor_scores = torch.where(
-                is_target_top,
-                top2_values[:, 1] if top2_values.shape[1] > 1 else top2_values[:, 0],
-                top2_values[:, 0]
-            )
-            
-            # GOP is difference between target and competitor
-            diffs = target_scores - competitor_scores
-            
-            # Average GOP for this phoneme
-            avg_gop = diffs.mean().item()
-            gop_scores.append(avg_gop)
+        # Pre-compute for all phonemes at once
+        with torch.inference_mode():
+            for pid_idx, (pid, frames) in enumerate(zip(phoneme_ids, alignment)):
+                if not frames:
+                    # No frames aligned to this phoneme
+                    gop_scores.append(-5.0)
+                    continue
+                
+                # Get all frames at once (vectorized)
+                frame_indices = torch.tensor(frames, dtype=torch.long, device=device)
+                frame_probs = log_probs[frame_indices]  # (n_frames, V)
+                
+                # Get target scores
+                target_scores = frame_probs[:, pid]  # (n_frames,)
+                
+                # Get top competitors efficiently
+                # For GOP, we want max of non-target scores
+                # Set target score to -inf temporarily to exclude it from max
+                frame_probs_copy = frame_probs.clone()
+                frame_probs_copy[:, pid] = -float('inf')
+                competitor_scores = frame_probs_copy.max(dim=-1).values  # (n_frames,)
+                
+                # GOP is difference between target and best competitor
+                diffs = target_scores - competitor_scores
+                
+                # Average GOP for this phoneme
+                avg_gop = diffs.mean().item()
+                gop_scores.append(avg_gop)
         
         return gop_scores
     

@@ -94,7 +94,7 @@ class AudioProcessor:
     
     def load_audio(self, audio_file: FileStorage) -> Tuple[np.ndarray, int]:
         """
-        Load and preprocess audio file.
+        Load and preprocess audio file with optimized settings.
         
         Args:
             audio_file: Uploaded audio file
@@ -110,13 +110,29 @@ class AudioProcessor:
             # Read file into bytes
             audio_bytes = io.BytesIO(audio_file.read())
             
-            # Load with librosa
+            # Load with librosa using optimized parameters
             logger.debug(f"Loading audio file: {audio_file.filename}")
-            speech_array, sr = librosa.load(
-                audio_bytes,
-                sr=self.sampling_rate,
-                mono=True
-            )
+            
+            # Try fast resampling methods with fallback
+            # Priority: kaiser_fast (resampy) > scipy > default
+            try:
+                # Use res_type='kaiser_fast' for faster resampling (requires resampy)
+                speech_array, sr = librosa.load(
+                    audio_bytes,
+                    sr=self.sampling_rate,
+                    mono=True,
+                    res_type='kaiser_fast'
+                )
+            except (ImportError, TypeError) as e:
+                # Fallback to scipy if resampy not available
+                logger.debug(f"kaiser_fast not available ({e}), using scipy resampling")
+                audio_bytes.seek(0)  # Reset file pointer
+                speech_array, sr = librosa.load(
+                    audio_bytes,
+                    sr=self.sampling_rate,
+                    mono=True,
+                    res_type='scipy'
+                )
             
             # Validate duration
             duration = len(speech_array) / sr

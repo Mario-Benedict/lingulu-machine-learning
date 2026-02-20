@@ -122,8 +122,22 @@ class Wav2Vec2PronunciationModel:
             
             # Enable inference optimization
             torch.set_grad_enabled(False)
-            if hasattr(torch, 'inference_mode'):
-                logger.debug("Enabling inference_mode for faster inference")
+            
+            # Try to compile model with PyTorch 2.0+ for extra speedup
+            if hasattr(torch, 'compile') and self.device.type == 'cuda':
+                try:
+                    logger.info("Compiling model with torch.compile() for faster inference...")
+                    self.model = torch.compile(self.model, mode='reduce-overhead')
+                    logger.info("✅ Model compiled successfully with torch.compile()")
+                    
+                    # Warm up compiled model with dummy input
+                    logger.info("Warming up compiled model...")
+                    dummy_input = torch.randn(1, 16000, device=self.device)
+                    with torch.inference_mode():
+                        _ = self.model(dummy_input)
+                    logger.info("✅ Model warm-up complete")
+                except Exception as e:
+                    logger.warning(f"Could not compile model: {e}. Continuing without compilation.")
             
             load_time = time.time() - start_time
             self._is_loaded = True
@@ -170,50 +184,41 @@ class Wav2Vec2PronunciationModel:
             logger.debug(f"Running inference on audio with {len(audio_array)} samples")
             start_time = time.perf_counter()
             
-            # Preprocessing with optimized settings
-            inputs = self.processor(
-                audio_array,
-                sampling_rate=self.sampling_rate,
-                return_tensors="pt",
-                padding=True
-            )
-            
-            # Move inputs to device (non-blocking for speed on GPU)
-            input_values = inputs.input_values.to(self.device, non_blocking=True)
-            
-            # Inference with GPU optimization and mixed precision
-            with torch.no_grad():
+            # Optimized preprocessing with minimal overhead
+            # Use inference_mode() instead of no_grad() for extra performance
+            # inference_mode() disables view tracking and is faster than no_grad()
+            with torch.inference_mode():
+                inputs = self.processor(
+                    audio_array,
+                    sampling_rate=self.sampling_rate,
+                    return_tensors="pt",
+                    padding=False  # Disable padding for single input (faster)
+                )
+                
+                # Move inputs to device (non-blocking for speed on GPU)
+                input_values = inputs.input_values.to(self.device, non_blocking=True)
+                
+                # Inference with GPU optimization and mixed precision
                 if self.device.type == 'cuda':
                     # Use automatic mixed precision for 2x speedup on GPU
                     with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
                         logits = self.model(input_values).logits
                 else:
                     logits = self.model(input_values).logits
-            
-            # Decoding - delay CPU transfer
-            predicted_ids = torch.argmax(logits, dim=-1)
-            transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
-            
-            latency = time.perf_counter() - start_time
-            
-            result = {
-                "transcription": transcription,
-                "latency_seconds": round(latency, 5),
-                "audio_samples": len(audio_array),
-                "audio_duration_seconds": round(len(audio_array) / self.sampling_rate, 2)
-            }
-            
-            # Calculate GOP if reference text provided and GOP enabled
-            if reference_text:
-                # Check if GOP is fully initialized and enabled
-                if self.enable_gop and self.gop_calculator is not None and self.g2p_model is not None:
+                
+                # Keep on GPU for GOP if needed, otherwise decode now
+                if reference_text and self.enable_gop and self.gop_calculator is not None and self.g2p_model is not None:
+                    # Keep logits on GPU for GOP calculation
+                    predicted_ids = torch.argmax(logits, dim=-1)
+                    transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
+                    
+                    # Calculate GOP with GPU-resident logits
+                    gop_start = time.perf_counter()
+                    
+                    # Get log probabilities for GOP - already on GPU
+                    log_probs = torch.log_softmax(logits.squeeze(0), dim=-1)
+                    
                     try:
-                        logger.debug(f"Calculating GOP for reference: '{reference_text}'")
-                        gop_start = time.perf_counter()
-                        
-                        # Get log probabilities for GOP - keep on GPU for speed
-                        log_probs = torch.log_softmax(logits.squeeze(0), dim=-1)
-                        
                         # Calculate GOP scores with GPU acceleration
                         sentence_score = self.gop_calculator.calculate_sentence_score(
                             text=reference_text,
@@ -224,23 +229,41 @@ class Wav2Vec2PronunciationModel:
                         )
                         
                         gop_latency = time.perf_counter() - gop_start
-                        
-                        # Add GOP results to output
-                        result['pronounciation_assessment'] = sentence_score.to_dict()
-                        result['gop_latency_seconds'] = round(gop_latency, 4)
+                        gop_result = sentence_score.to_dict()
+                        gop_result['gop_latency_seconds'] = round(gop_latency, 5)
                         
                         logger.info(
                             f"GOP calculated: avg score {sentence_score.average_score:.1f}% "
-                            f"in {gop_latency:.4f}s"
+                            f"in {gop_latency:.5f}s"
                         )
-                        
                     except Exception as e:
                         logger.error(f"GOP calculation failed: {e}", exc_info=True)
-                        result['pronounciation_assessment'] = {
+                        gop_result = {
                             'error': 'GOP calculation failed',
                             'details': str(e)
                         }
+                        gop_latency = 0.0
                 else:
+                    # No GOP needed, just decode
+                    predicted_ids = torch.argmax(logits, dim=-1)
+                    transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
+                    gop_result = None
+                    gop_latency = 0.0
+            
+            latency = time.perf_counter() - start_time
+            
+            result = {
+                "transcription": transcription,
+                "latency_seconds": round(latency, 5),
+                "audio_samples": len(audio_array),
+                "audio_duration_seconds": round(len(audio_array) / self.sampling_rate, 2)
+            }
+            
+            # Add GOP results if calculated
+            if reference_text:
+                if gop_result is not None:
+                    result['pronounciation_assessment'] = gop_result
+                elif not self.enable_gop or self.gop_calculator is None or self.g2p_model is None:
                     # GOP requested but not available
                     logger.debug(f"GOP requested but not available (enable_gop={self.enable_gop}, gop_calculator={self.gop_calculator is not None}, g2p_model={self.g2p_model is not None})")
                     result['pronounciation_assessment'] = {
@@ -249,7 +272,7 @@ class Wav2Vec2PronunciationModel:
                     }
             
             logger.info(
-                f"Inference completed in {latency:.4f}s. "
+                f"Inference completed in {latency:.5f}s. "
                 f"Transcription length: {len(transcription)} chars"
             )
             

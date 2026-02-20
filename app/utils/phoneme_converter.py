@@ -88,7 +88,12 @@ class PhonemeConverter:
         # Store mappings with different names to avoid overwriting methods
         self._arpabet_to_ipa_map = ARPABET_TO_IPA
         self._ipa_split_map = IPA_SPLIT_MAP
-        logger.debug("PhonemeConverter initialized")
+        
+        # Cache for G2P conversions to avoid repeated calls
+        self._g2p_cache: Dict[str, List[str]] = {}
+        self._word_ipa_cache: Dict[tuple, List[str]] = {}
+        
+        logger.debug("PhonemeConverter initialized with caching")
     
     def arpabet_to_ipa(self, arpabet_list: List[str]) -> List[str]:
         """
@@ -134,7 +139,7 @@ class PhonemeConverter:
         split_diphthongs: bool = True
     ) -> List[str]:
         """
-        Convert text to IPA phonemes.
+        Convert text to IPA phonemes with caching.
         
         Args:
             text: Input text
@@ -144,6 +149,13 @@ class PhonemeConverter:
         Returns:
             List of IPA phonemes
         """
+        # Create cache key
+        cache_key = (text.lower().strip(), split_diphthongs)
+        
+        # Check cache first
+        if cache_key in self._word_ipa_cache:
+            return self._word_ipa_cache[cache_key]
+        
         # Get ARPABET phonemes from g2p
         arpabet = [
             p for p in g2p_model(text) 
@@ -157,6 +169,9 @@ class PhonemeConverter:
         if split_diphthongs:
             ipa = self.split_ipa_diphthongs(ipa)
         
+        # Cache result
+        self._word_ipa_cache[cache_key] = ipa
+        
         logger.debug(f"Text '{text}' -> ARPABET: {arpabet} -> IPA: {ipa}")
         
         return ipa
@@ -168,7 +183,7 @@ class PhonemeConverter:
         split_diphthongs: bool = True
     ) -> List[str]:
         """
-        Convert a single word to IPA phonemes.
+        Convert a single word to IPA phonemes with caching.
         
         Args:
             word: Input word
@@ -181,6 +196,13 @@ class PhonemeConverter:
         # Clean word
         word = word.strip().lower()
         
+        # Create cache key
+        cache_key = (word, split_diphthongs)
+        
+        # Check cache first
+        if cache_key in self._word_ipa_cache:
+            return self._word_ipa_cache[cache_key]
+        
         # Get ARPABET
         arpabet = [p for p in g2p_model(word) if p.strip()]
         
@@ -190,5 +212,8 @@ class PhonemeConverter:
         # Split diphthongs if requested
         if split_diphthongs:
             ipa = self.split_ipa_diphthongs(ipa)
+        
+        # Cache result
+        self._word_ipa_cache[cache_key] = ipa
         
         return ipa
