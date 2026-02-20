@@ -23,10 +23,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy and install Python dependencies (use production requirements for smaller image)
 COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
-    # Install PyTorch with CUDA 12.1 support first
+    # Install PyTorch with CUDA 12.1 support first (latest stable versions)
     pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
-    # Install other requirements
-    pip install --no-cache-dir -r requirements.txt && \
+    # Install other requirements except torch packages (already installed with CUDA support)
+    grep -vE "^(torch|torchvision|torchaudio)" requirements.txt > requirements_filtered.txt && \
+    pip install --no-cache-dir -r requirements_filtered.txt && \
+    # Download NLTK data needed for g2p_en
+    python -c "import nltk; nltk.download('averaged_perceptron_tagger_eng', download_dir='/opt/nltk_data')" && \
     # Remove unnecessary files to reduce size
     find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/venv -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
@@ -63,6 +66,9 @@ WORKDIR /workspace
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Copy NLTK data from builder
+COPY --from=builder /opt/nltk_data /opt/nltk_data
+
 # Copy application code to /workspace/app/
 COPY --chown=appuser:appuser . ./app/
 
@@ -79,6 +85,7 @@ ENV PYTHONUNBUFFERED=1 \
     FLASK_ENV=production \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/workspace \
+    NLTK_DATA=/opt/nltk_data \
     CUDA_VISIBLE_DEVICES=0 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
