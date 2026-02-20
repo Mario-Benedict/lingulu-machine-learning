@@ -98,6 +98,7 @@ ENV PYTHONUNBUFFERED=1 \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
     TORCH_HOME=/workspace/.cache/torch \
+    DISABLE_TORCH_COMPILE=1 \
     HF_HUB_DISABLE_IMPLICIT_TOKEN=1
 
 # Expose port

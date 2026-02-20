@@ -2,6 +2,7 @@
 Wav2Vec2 model wrapper for pronunciation prediction.
 Handles model loading, inference, and result processing.
 """
+import os
 import time
 import torch
 import numpy as np
@@ -124,20 +125,39 @@ class Wav2Vec2PronunciationModel:
             torch.set_grad_enabled(False)
             
             # Try to compile model with PyTorch 2.0+ for extra speedup
-            if hasattr(torch, 'compile') and self.device.type == 'cuda':
+            # Can be disabled via DISABLE_TORCH_COMPILE=1 environment variable
+            disable_compile = os.environ.get('DISABLE_TORCH_COMPILE', '0') == '1'
+            
+            if hasattr(torch, 'compile') and self.device.type == 'cuda' and not disable_compile:
                 try:
-                    logger.info("Compiling model with torch.compile() for faster inference...")
-                    self.model = torch.compile(self.model, mode='reduce-overhead')
-                    logger.info("✅ Model compiled successfully with torch.compile()")
+                    logger.info("Attempting to compile model with torch.compile()...")
                     
-                    # Warm up compiled model with dummy input
-                    logger.info("Warming up compiled model...")
+                    # Configure torch._dynamo to suppress errors and fall back to eager mode
+                    if hasattr(torch, '_dynamo'):
+                        torch._dynamo.config.suppress_errors = True
+                    
+                    # Use 'default' mode instead of 'reduce-overhead' for better compatibility
+                    compiled_model = torch.compile(self.model, mode='default')
+                    
+                    # Test compilation with dummy input before committing
+                    logger.debug("Testing compiled model with dummy input...")
                     dummy_input = torch.randn(1, 16000, device=self.device)
                     with torch.inference_mode():
-                        _ = self.model(dummy_input)
-                    logger.info("✅ Model warm-up complete")
+                        _ = compiled_model(dummy_input)
+                    
+                    # If test succeeded, use compiled model
+                    self.model = compiled_model
+                    logger.info("✅ Model compiled successfully with torch.compile()")
+                    
                 except Exception as e:
-                    logger.warning(f"Could not compile model: {e}. Continuing without compilation.")
+                    logger.warning(
+                        f"torch.compile() failed or unavailable: {str(e)[:200]}. "
+                        f"Falling back to eager mode (still optimized with inference_mode + mixed precision)."
+                    )
+                    # Ensure we're using the original uncompiled model
+                    pass
+            elif disable_compile:
+                logger.info("torch.compile() disabled via DISABLE_TORCH_COMPILE environment variable")
             
             load_time = time.time() - start_time
             self._is_loaded = True
