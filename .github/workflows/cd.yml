@@ -247,22 +247,26 @@ jobs:
           
           # Initialize git repository
           echo "  - Initializing git..."
-          git init
+          git init -b main
           git config user.email "github-actions@github.com"
           git config user.name "GitHub Actions Bot"
           
           # Add Hugging Face Space as remote
           echo "  - Configuring remote..."
-          git remote add space https://huggingface.co/spaces/$HF_SPACE 2>/dev/null || \
-          git remote set-url space https://huggingface.co/spaces/$HF_SPACE
+          git remote add space https://huggingface.co/spaces/$HF_SPACE
           
-          # Pull existing content (if any)
-          echo "  - Syncing with existing space..."
-          git pull space main --allow-unrelated-histories 2>/dev/null || echo "    (No existing content)"
+          # Try to pull existing content (if space exists)
+          echo "  - Checking existing space..."
+          if git ls-remote --exit-code --heads space main 2>/dev/null; then
+            echo "    Found existing content, pulling..."
+            git pull space main --allow-unrelated-histories --no-rebase || echo "    (Pull conflicts, will force push)"
+          else
+            echo "    No existing content (new space)"
+          fi
           
           # Stage all files
           echo "  - Staging files..."
-          git add .
+          git add -A
           
           # Create commit message
           COMMIT_MSG="🚀 Deploy from GitHub Actions - $(date '+%Y-%m-%d %H:%M:%S')"
@@ -270,14 +274,21 @@ jobs:
             COMMIT_MSG="$COMMIT_MSG | Commit: ${GITHUB_SHA:0:7}"
           fi
           
+          # Commit changes
           echo "  - Committing changes..."
-          git commit -m "$COMMIT_MSG" || echo "    (No changes to commit)"
-          
-          # Push to Hugging Face Spaces
-          echo "  - Pushing to Hugging Face..."
-          git push https://oauth:$HF_TOKEN@huggingface.co/spaces/$HF_SPACE main --force
-          
-          echo ""
+          if git commit -m "$COMMIT_MSG"; then
+            echo "    ✓ Changes committed"
+            
+            # Push to Hugging Face Spaces
+            echo "  - Pushing to Hugging Face..."
+            git push https://oauth:$HF_TOKEN@huggingface.co/spaces/$HF_SPACE main --force
+            
+            echo ""
+            echo "✅ Deployment completed successfully!"
+          else
+            echo "    ! No changes to commit"
+            echo "⚠️  Nothing to deploy (no changes detected)"
+          fi
           echo "✅ Deployment completed successfully!"
           echo "📍 Space URL: https://huggingface.co/spaces/$HF_SPACE"
           echo "🌐 API URL: https://${HF_SPACE//\//-}.hf.space"
