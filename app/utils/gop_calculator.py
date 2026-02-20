@@ -70,6 +70,9 @@ class GOPCalculator:
             phoneme_converter: PhonemeConverter instance
         """
         self.phoneme_converter = phoneme_converter or PhonemeConverter()
+        # Cache for vocab to avoid repeated calls
+        self._vocab_cache: Optional[Dict[str, int]] = None
+        self._blank_id_cache: Optional[int] = None
         logger.debug("GOPCalculator initialized")
     
     def ctc_forced_alignment(
@@ -79,45 +82,53 @@ class GOPCalculator:
         blank_id: int
     ) -> List[List[int]]:
         """
-        Perform CTC forced alignment.
+        Perform CTC forced alignment with GPU acceleration.
         
         Args:
-            log_probs: Log probabilities tensor (T, V)
+            log_probs: Log probabilities tensor (T, V) - can be on GPU
             target_ids: Target phoneme IDs
             blank_id: Blank token ID
             
         Returns:
             List of frame indices for each target phoneme
         """
+        device = log_probs.device
         T, V = log_probs.shape
         N = len(target_ids)
         
-        # Initialize trellis
-        trellis = torch.full((T + 1, N + 1), -float("inf"))
+        # Convert target_ids to tensor for GPU operations
+        target_ids_tensor = torch.tensor(target_ids, dtype=torch.long, device=device)
+        
+        # Initialize trellis on same device as log_probs
+        trellis = torch.full((T + 1, N + 1), -float("inf"), device=device)
         trellis[0, 0] = 0.0
         
-        # Forward pass
-        for t in range(T):
-            # Blank transition
-            trellis[t + 1, 0] = trellis[t, 0] + log_probs[t, blank_id]
-            
-            # Phoneme transitions
-            for n in range(N):
-                # Stay in current state (emit blank)
-                stay = trellis[t, n + 1] + log_probs[t, blank_id]
-                # Move to next phoneme
-                move = trellis[t, n] + log_probs[t, target_ids[n]]
-                trellis[t + 1, n + 1] = torch.maximum(stay, move)
+        # Pre-extract blank and target scores for vectorization
+        blank_scores = log_probs[:, blank_id]  # (T,)
+        target_scores = log_probs[:, target_ids_tensor]  # (T, N)
         
-        # Backtrack to find alignment
+        # Forward pass with vectorized operations
+        for t in range(T):
+            # Blank transition (vectorized)
+            trellis[t + 1, 0] = trellis[t, 0] + blank_scores[t]
+            
+            # Phoneme transitions (vectorized)
+            stay = trellis[t, 1:N+1] + blank_scores[t]  # (N,)
+            move = trellis[t, 0:N] + target_scores[t]   # (N,)
+            trellis[t + 1, 1:N+1] = torch.maximum(stay, move)
+        
+        # Backtrack to find alignment (move to CPU only for this part)
+        trellis_cpu = trellis.cpu()
+        log_probs_cpu = log_probs.cpu()
+        
         t, n = T, N
         alignment: list[list[int]] = [[] for _ in range(N)]
         
         while t > 0 and n >= 0:
             if n > 0:
                 # Check if we emitted phoneme at this step
-                move_score = trellis[t - 1, n - 1] + log_probs[t - 1, target_ids[n - 1]]
-                if torch.abs(move_score - trellis[t, n]) < 1e-6:
+                move_score = trellis_cpu[t - 1, n - 1] + log_probs_cpu[t - 1, target_ids[n - 1]]
+                if torch.abs(move_score - trellis_cpu[t, n]) < 1e-6:
                     alignment[n - 1].append(t - 1)
                     t -= 1
                     n -= 1
@@ -136,17 +147,26 @@ class GOPCalculator:
         tokenizer
     ) -> List[float]:
         """
-        Calculate GOP scores for phonemes.
+        Calculate GOP scores for phonemes with GPU acceleration.
         
         Args:
-            log_probs: Log probabilities from model (T, V)
+            log_probs: Log probabilities from model (T, V) - can be on GPU
             ipa_phonemes: List of IPA phonemes
             tokenizer: Model tokenizer
             
         Returns:
             List of GOP scores (raw, not normalized)
         """
-        vocab = tokenizer.get_vocab()
+        device = log_probs.device
+        
+        # Use cached vocab or fetch and cache it
+        if self._vocab_cache is None or self._blank_id_cache is None:
+            self._vocab_cache = tokenizer.get_vocab()
+            self._blank_id_cache = tokenizer.pad_token_id
+            logger.debug(f"Cached vocab with {len(self._vocab_cache)} entries")
+        
+        vocab = self._vocab_cache
+        blank_id = self._blank_id_cache
         
         # Get phoneme IDs, skip unknown phonemes
         phoneme_ids = []
@@ -162,8 +182,6 @@ class GOPCalculator:
             logger.warning("No valid phonemes found in vocabulary")
             return []
         
-        blank_id = tokenizer.pad_token_id
-        
         # Perform forced alignment
         try:
             alignment = self.ctc_forced_alignment(log_probs, phoneme_ids, blank_id)
@@ -171,37 +189,40 @@ class GOPCalculator:
             logger.error(f"CTC alignment failed: {e}", exc_info=True)
             return [-5.0] * len(phoneme_ids)
         
+        # Vectorized GOP calculation
         gop_scores = []
+        phoneme_ids_tensor = torch.tensor(phoneme_ids, dtype=torch.long, device=device)
         
-        for pid, frames in zip(phoneme_ids, alignment):
+        for pid_idx, (pid, frames) in enumerate(zip(phoneme_ids, alignment)):
             if not frames:
                 # No frames aligned to this phoneme
                 gop_scores.append(-5.0)
                 logger.debug(f"No alignment for phoneme ID {pid}")
                 continue
             
-            diffs = []
-            for t in frames:
-                frame = log_probs[t]
-                target_score = frame[pid]
-                
-                # Get top 2 scores
-                top2 = torch.topk(frame, min(2, len(frame)))
-                
-                # Find competitor (highest non-target score)
-                if pid == torch.argmax(frame).item():
-                    # Target is highest, use second highest
-                    competitor_score = top2.values[1] if len(top2.values) > 1 else top2.values[0]
-                else:
-                    # Use highest
-                    competitor_score = top2.values[0]
-                
-                # GOP is difference between target and competitor
-                diff = target_score - competitor_score
-                diffs.append(diff)
+            # Get all frames at once (vectorized)
+            frame_indices = torch.tensor(frames, dtype=torch.long, device=device)
+            frame_probs = log_probs[frame_indices]  # (n_frames, V)
+            
+            # Get target scores
+            target_scores = frame_probs[:, pid]  # (n_frames,)
+            
+            # Get top 2 scores per frame (vectorized)
+            top2_values, top2_indices = torch.topk(frame_probs, min(2, frame_probs.shape[1]), dim=-1)
+            
+            # Calculate competitor scores (vectorized)
+            is_target_top = (top2_indices[:, 0] == pid)
+            competitor_scores = torch.where(
+                is_target_top,
+                top2_values[:, 1] if top2_values.shape[1] > 1 else top2_values[:, 0],
+                top2_values[:, 0]
+            )
+            
+            # GOP is difference between target and competitor
+            diffs = target_scores - competitor_scores
             
             # Average GOP for this phoneme
-            avg_gop = torch.mean(torch.stack(diffs)).item()
+            avg_gop = diffs.mean().item()
             gop_scores.append(avg_gop)
         
         return gop_scores
@@ -306,23 +327,29 @@ class GOPCalculator:
         text: str,
         log_probs: torch.Tensor,
         tokenizer,
-        g2p_model
+        g2p_model,
+        device: Optional[torch.device] = None
     ) -> SentenceScore:
         """
-        Calculate GOP scores for entire sentence.
+        Calculate GOP scores for entire sentence with GPU acceleration.
         
         Args:
             text: Input text
-            log_probs: Model log probabilities (T, V)
+            log_probs: Model log probabilities (T, V) - can be on GPU
             tokenizer: Model tokenizer
             g2p_model: G2P model
+            device: Device to use (will use log_probs device if None)
             
         Returns:
             SentenceScore object with all scores
         """
         logger.debug(f"Calculating GOP for text: '{text}'")
         
-        # Convert text to IPA phonemes
+        # Ensure log_probs is on specified device
+        if device is not None and log_probs.device != device:
+            log_probs = log_probs.to(device)
+        
+        # Convert text to IPA phonemes (batch process all words at once)
         ipa_phonemes = self.phoneme_converter.text_to_ipa(
             text,
             g2p_model,

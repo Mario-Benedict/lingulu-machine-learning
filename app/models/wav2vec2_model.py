@@ -49,9 +49,18 @@ class Wav2Vec2PronunciationModel:
         self.gop_calculator: Optional[GOPCalculator] = None
         self.g2p_model = None
         
+        # Log device info prominently
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            logger.info(f"🚀 GPU DETECTED: {gpu_name} with {gpu_memory:.1f}GB memory")
+            logger.info(f"✅ Using device: {self.device} (CUDA acceleration enabled)")
+        else:
+            logger.warning(f"⚠️  No GPU detected - Using device: {self.device} (CPU only)")
+        
         logger.info(
             f"Initializing Wav2Vec2PronunciationModel with model: {model_id}, "
-            f"GOP enabled: {enable_gop}, Device: {self.device}"
+            f"GOP enabled: {enable_gop}"
         )
     
     def load(self) -> None:
@@ -68,21 +77,30 @@ class Wav2Vec2PronunciationModel:
         try:
             # Initialize GOP calculator if enabled
             if self.enable_gop:
+                gop_init_success = False
                 try:
                     from g2p_en import G2p
                     logger.debug("Loading G2P model for GOP calculation...")
                     self.g2p_model = G2p()
                     self.gop_calculator = GOPCalculator()
-                    logger.info("GOP calculator initialized successfully")
-                except ImportError:
+                    gop_init_success = True
+                    logger.info("✅ GOP calculator initialized successfully")
+                except ImportError as e:
                     logger.warning(
-                        "g2p-en not installed. GOP scoring disabled. "
-                        "Install with: pip install g2p-en"
+                        f"g2p-en not installed. GOP scoring disabled. "
+                        f"Install with: pip install g2p-en. Error: {e}"
                     )
-                    self.enable_gop = False
                 except Exception as e:
-                    logger.warning(f"Failed to initialize GOP calculator: {e}")
+                    logger.warning(f"Failed to initialize GOP calculator: {e}", exc_info=True)
+                
+                # Ensure enable_gop accurately reflects GOP availability
+                if not gop_init_success:
                     self.enable_gop = False
+                    self.gop_calculator = None
+                    self.g2p_model = None
+                    logger.info("GOP scoring is DISABLED for this instance")
+                else:
+                    logger.info("GOP scoring is ENABLED and ready")
             
             logger.info(f"Loading model from Hugging Face: {self.model_id}")
             start_time = time.time()
@@ -101,6 +119,11 @@ class Wav2Vec2PronunciationModel:
             
             # Set to evaluation mode
             self.model.eval()
+            
+            # Enable inference optimization
+            torch.set_grad_enabled(False)
+            if hasattr(torch, 'inference_mode'):
+                logger.debug("Enabling inference_mode for faster inference")
             
             load_time = time.time() - start_time
             self._is_loaded = True
@@ -147,7 +170,7 @@ class Wav2Vec2PronunciationModel:
             logger.debug(f"Running inference on audio with {len(audio_array)} samples")
             start_time = time.perf_counter()
             
-            # Preprocessing
+            # Preprocessing with optimized settings
             inputs = self.processor(
                 audio_array,
                 sampling_rate=self.sampling_rate,
@@ -155,16 +178,21 @@ class Wav2Vec2PronunciationModel:
                 padding=True
             )
             
-            # Move inputs to device
-            input_values = inputs.input_values.to(self.device)
+            # Move inputs to device (non-blocking for speed on GPU)
+            input_values = inputs.input_values.to(self.device, non_blocking=True)
             
-            # Inference
+            # Inference with GPU optimization and mixed precision
             with torch.no_grad():
-                logits = self.model(input_values).logits
+                if self.device.type == 'cuda':
+                    # Use automatic mixed precision for 2x speedup on GPU
+                    with torch.cuda.amp.autocast():
+                        logits = self.model(input_values).logits
+                else:
+                    logits = self.model(input_values).logits
             
-            # Decoding (move to CPU for decoding)
-            predicted_ids = torch.argmax(logits, dim=-1).cpu()
-            transcription = self.processor.batch_decode(predicted_ids)[0]
+            # Decoding - delay CPU transfer
+            predicted_ids = torch.argmax(logits, dim=-1)
+            transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
             
             latency = time.perf_counter() - start_time
             
@@ -176,44 +204,49 @@ class Wav2Vec2PronunciationModel:
             }
             
             # Calculate GOP if reference text provided and GOP enabled
-            if reference_text and self.enable_gop and self.gop_calculator and self.g2p_model:
-                try:
-                    logger.debug(f"Calculating GOP for reference: '{reference_text}'")
-                    gop_start = time.perf_counter()
-                    
-                    # Get log probabilities for GOP (move to CPU for compatibility)
-                    log_probs = torch.log_softmax(logits.squeeze(0), dim=-1).cpu()
-                    
-                    # Calculate GOP scores
-                    sentence_score = self.gop_calculator.calculate_sentence_score(
-                        text=reference_text,
-                        log_probs=log_probs,
-                        tokenizer=self.processor.tokenizer,
-                        g2p_model=self.g2p_model
-                    )
-                    
-                    gop_latency = time.perf_counter() - gop_start
-                    
-                    # Add GOP results to output
-                    result['pronounciation_assessment'] = sentence_score.to_dict()
-                    result['gop_latency_seconds'] = round(gop_latency, 4)
-                    
-                    logger.info(
-                        f"GOP calculated: avg score {sentence_score.average_score:.1f}% "
-                        f"in {gop_latency:.4f}s"
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"GOP calculation failed: {e}", exc_info=True)
-                    result['pronunciation_assessment'] = {
-                        'error': 'GOP calculation failed',
-                        'details': str(e)
+            if reference_text:
+                # Check if GOP is fully initialized and enabled
+                if self.enable_gop and self.gop_calculator is not None and self.g2p_model is not None:
+                    try:
+                        logger.debug(f"Calculating GOP for reference: '{reference_text}'")
+                        gop_start = time.perf_counter()
+                        
+                        # Get log probabilities for GOP - keep on GPU for speed
+                        log_probs = torch.log_softmax(logits.squeeze(0), dim=-1)
+                        
+                        # Calculate GOP scores with GPU acceleration
+                        sentence_score = self.gop_calculator.calculate_sentence_score(
+                            text=reference_text,
+                            log_probs=log_probs,
+                            tokenizer=self.processor.tokenizer,
+                            g2p_model=self.g2p_model,
+                            device=self.device
+                        )
+                        
+                        gop_latency = time.perf_counter() - gop_start
+                        
+                        # Add GOP results to output
+                        result['pronounciation_assessment'] = sentence_score.to_dict()
+                        result['gop_latency_seconds'] = round(gop_latency, 4)
+                        
+                        logger.info(
+                            f"GOP calculated: avg score {sentence_score.average_score:.1f}% "
+                            f"in {gop_latency:.4f}s"
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"GOP calculation failed: {e}", exc_info=True)
+                        result['pronounciation_assessment'] = {
+                            'error': 'GOP calculation failed',
+                            'details': str(e)
+                        }
+                else:
+                    # GOP requested but not available
+                    logger.debug(f"GOP requested but not available (enable_gop={self.enable_gop}, gop_calculator={self.gop_calculator is not None}, g2p_model={self.g2p_model is not None})")
+                    result['pronounciation_assessment'] = {
+                        'error': 'GOP not enabled. Install g2p-en to enable GOP scoring.',
+                        'gop_status': 'disabled'
                     }
-            elif reference_text and not self.enable_gop:
-                logger.debug("GOP requested but not enabled")
-                result['pronunciation_assessment'] = {
-                    'error': 'GOP not enabled. Install g2p-en to enable GOP scoring.'
-                }
             
             logger.info(
                 f"Inference completed in {latency:.4f}s. "

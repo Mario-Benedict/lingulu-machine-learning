@@ -4,16 +4,38 @@ Converts between ARPABET and IPA phoneme representations.
 """
 from typing import List, Dict
 import nltk
+import os
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Download required NLTK data for g2p_en
+# Set NLTK data path if not already set
+if 'NLTK_DATA' in os.environ:
+    nltk_data_path = os.environ['NLTK_DATA']
+    if nltk_data_path not in nltk.data.path:
+        nltk.data.path.insert(0, nltk_data_path)
+        logger.debug(f"Added NLTK data path: {nltk_data_path}")
+
+# Download required NLTK data for g2p_en (only if not found)
 try:
     nltk.data.find('taggers/averaged_perceptron_tagger_eng')
+    logger.debug("NLTK averaged_perceptron_tagger_eng found")
 except LookupError:
-    logger.info("Downloading NLTK averaged_perceptron_tagger_eng...")
-    nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+    try:
+        logger.info("Downloading NLTK averaged_perceptron_tagger_eng...")
+        nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+    except Exception as e:
+        logger.warning(f"Failed to download NLTK data: {e}")
+
+try:
+    nltk.data.find('corpora/cmudict')
+    logger.debug("NLTK cmudict found")
+except LookupError:
+    try:
+        logger.info("Downloading NLTK cmudict...")
+        nltk.download('cmudict', quiet=True)
+    except Exception as e:
+        logger.warning(f"Failed to download NLTK cmudict: {e}")
 
 
 # ARPABET to IPA mapping with stress markers

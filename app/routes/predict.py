@@ -83,7 +83,7 @@ def create_prediction_routes(model, audio_processor):
             logger.info(
                 f"Prediction successful: filename={audio_file.filename}, "
                 f"latency={result['latency_seconds']}s, "
-                f"gop_enabled={bool(reference_text and 'pronunciation_assessment' in result)}"
+                f"gop_enabled={bool(reference_text and 'pronounciation_assessment' in result)}"
             )
             
             return jsonify(result), 200

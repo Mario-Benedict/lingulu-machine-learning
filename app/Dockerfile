@@ -28,8 +28,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
     # Install other requirements except torch packages (already installed with CUDA support)
     grep -vE "^(torch|torchvision|torchaudio)" requirements.txt > requirements_filtered.txt && \
     pip install --no-cache-dir -r requirements_filtered.txt && \
-    # Download NLTK data needed for g2p_en
-    python -c "import nltk; nltk.download('averaged_perceptron_tagger_eng', download_dir='/opt/nltk_data')" && \
+    # Download NLTK data needed for g2p_en (both tagger variants and cmudict)
+    python -c "import nltk; nltk.download('averaged_perceptron_tagger_eng', download_dir='/opt/nltk_data', quiet=True); nltk.download('averaged_perceptron_tagger', download_dir='/opt/nltk_data', quiet=True); nltk.download('cmudict', download_dir='/opt/nltk_data', quiet=True)" && \
+    # Set permissions for nltk_data
+    chmod -R 755 /opt/nltk_data && \
     # Remove unnecessary files to reduce size
     find /opt/venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
     find /opt/venv -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
@@ -72,8 +74,11 @@ COPY --from=builder /opt/nltk_data /opt/nltk_data
 # Copy application code to /workspace/app/
 COPY --chown=appuser:appuser . ./app/
 
-# Remove any unnecessary files that might have been copied
-RUN find ./app -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+# Create cache directories with proper permissions
+RUN mkdir -p /workspace/.cache/huggingface /workspace/.cache/torch && \
+    chown -R appuser:appuser /workspace/.cache && \
+    # Remove any unnecessary files that might have been copied
+    find ./app -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
     find ./app -type f -name "*.pyc" -delete && \
     find ./app -type f -name "*.pyo" -delete
 
@@ -86,11 +91,14 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/workspace \
     NLTK_DATA=/opt/nltk_data \
+    OMP_NUM_THREADS=4 \
+    MKL_NUM_THREADS=4 \
     CUDA_VISIBLE_DEVICES=0 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
-    TORCH_HOME=/workspace/.cache/torch
+    TORCH_HOME=/workspace/.cache/torch \
+    HF_HUB_DISABLE_IMPLICIT_TOKEN=1
 
 # Expose port
 EXPOSE 5000
