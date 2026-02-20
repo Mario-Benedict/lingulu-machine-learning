@@ -4,7 +4,7 @@ Converts between ARPABET and IPA phoneme representations.
 """
 from typing import List, Dict
 import nltk
-from app.utils.logger import get_logger
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 

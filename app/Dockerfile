@@ -93,4 +93,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Run application with gunicorn (optimized for GPU workload)
 # Using 1 worker to avoid GPU memory duplication, with more threads for concurrent requests
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "8", "--worker-class", "gthread", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "app.app:create_app()"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "16", "--worker-class", "gthread", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "app:create_app()"]

@@ -1,7 +1,7 @@
 """
 Configuration package initialization.
 """
-from app.config.settings import (
+from config.settings import (
     Config,
     DevelopmentConfig,
     ProductionConfig,

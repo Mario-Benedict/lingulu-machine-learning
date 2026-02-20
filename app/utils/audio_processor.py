@@ -8,8 +8,8 @@ import numpy as np
 from typing import Tuple, BinaryIO
 from werkzeug.datastructures import FileStorage
 
-from app.utils.logger import get_logger
-from app.utils.exceptions import (
+from utils.logger import get_logger
+from utils.exceptions import (
     AudioProcessingError,
     InvalidAudioFormatError,
     FileTooLargeError,
