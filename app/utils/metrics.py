@@ -31,11 +31,6 @@ class MetricsTracker:
         self.total_errors = 0
         self.start_time = time.time()
         
-        # System metrics caching (to avoid frequent polling)
-        self._system_metrics_cache = None
-        self._system_metrics_cache_time = 0
-        self._system_metrics_cache_ttl = 2.0  # Cache for 2 seconds
-        
         # Check GPU availability
         try:
             import torch
@@ -122,17 +117,8 @@ class MetricsTracker:
     
     def get_system_metrics(self) -> Dict:
         """Get system resource usage (CPU, RAM, GPU).
-        Cached for 2 seconds to avoid frequent polling.
+        Real-time fetch without caching - always returns fresh data.
         """
-        with self.lock:
-            current_time = time.time()
-            
-            # Return cached result if still valid
-            if (self._system_metrics_cache is not None and 
-                current_time - self._system_metrics_cache_time < self._system_metrics_cache_ttl):
-                return self._system_metrics_cache
-        
-        # Cache expired or not initialized, fetch new data
         try:
             cpu_percent = psutil.cpu_percent(interval=0)
             memory = psutil.virtual_memory()
@@ -165,11 +151,6 @@ class MetricsTracker:
                     })
                 except Exception:
                     pass
-            
-            # Update cache
-            with self.lock:
-                self._system_metrics_cache = result
-                self._system_metrics_cache_time = current_time
             
             return result
         except Exception:
