@@ -246,7 +246,7 @@ def create_metrics_routes():
     <div class="container">
         <div class="header">
             <h1>Lingulu ML Performance Dashboard</h1>
-            <p class="subtitle">Real-time Inference Monitoring<span class="status-badge">ACTIVE</span></p>
+            <p class="subtitle">Real-time Monitoring<span class="status-badge">ACTIVE</span></p>
         </div>
         
         <div class="system-info">
@@ -274,7 +274,7 @@ def create_metrics_routes():
             </div>
         </div>
         
-        <h2 class="section-title">Inference Latency Metrics</h2>
+        <h2 class="section-title">Latency Metrics</h2>
         <div class="metrics-grid">
             <div class="metric-card">
                 <div class="metric-label">P50 Latency</div>
@@ -304,7 +304,7 @@ def create_metrics_routes():
         
         <h2 class="section-title">Performance Analysis</h2>
         <div class="chart-container full-width">
-            <div class="chart-title">Inference Latency Timeline</div>
+            <div class="chart-title">Latency Timeline</div>
             <canvas id="latencyChart" height="80"></canvas>
         </div>
         
