@@ -26,7 +26,6 @@ class MetricsTracker:
         """
         self.max_samples = max_samples
         self.inference_latencies = deque(maxlen=max_samples)  # Only inference time
-        self.latency_history = deque(maxlen=100)  # Last 100 for graphing (timestamp, latency)
         self.lock = threading.Lock()
         self.total_requests = 0
         self.total_errors = 0
@@ -45,7 +44,6 @@ class MetricsTracker:
         """Record inference latency measurement (model inference only)."""
         with self.lock:
             self.inference_latencies.append(latency_seconds)
-            self.latency_history.append((time.time(), latency_seconds * 1000))  # ms for graph
             self.total_requests += 1
     
     def record_error(self):
@@ -108,14 +106,14 @@ class MetricsTracker:
                 "uptime_seconds": round(time.time() - self.start_time, 2)
             }
     
-    def get_latency_history(self) -> List[Tuple[float, float]]:
-        """Get recent latency history for graphing.
+    def get_latencies_list(self) -> List[float]:
+        """Get recorded latencies as list (in milliseconds).
         
         Returns:
-            List of (timestamp, latency_ms) tuples
+            List of latency values in ms
         """
         with self.lock:
-            return list(self.latency_history)
+            return [lat * 1000 for lat in self.inference_latencies]
     
     def get_system_metrics(self) -> Dict:
         """Get system resource usage (CPU, RAM, GPU).
@@ -166,10 +164,9 @@ class MetricsTracker:
             }
     
     def reset_metrics(self):
-        """Reset all metrics."""
+        """Reset all metrics including latency data."""
         with self.lock:
             self.inference_latencies.clear()
-            self.latency_history.clear()
             self.total_requests = 0
             self.total_errors = 0
             self.start_time = time.time()

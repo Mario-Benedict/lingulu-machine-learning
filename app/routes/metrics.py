@@ -23,19 +23,21 @@ def create_metrics_routes():
     @metrics_bp.route('/metrics', methods=['GET'])
     def get_metrics():
         """
-        Get current API metrics including latency percentiles.
+        Get current API metrics including latency percentiles and latencies list.
         
         Returns:
-            JSON with p50, p90, p99 latency and other performance metrics
+            JSON with p50, p90, p99 latency and recorded latencies
         """
         tracker = get_metrics_tracker()
         metrics = tracker.get_metrics()
+        latencies = tracker.get_latencies_list()
         
         logger.debug("Metrics requested")
         
         return jsonify({
             "status": "success",
-            "metrics": metrics
+            "metrics": metrics,
+            "latencies": latencies
         }), 200
     
     @metrics_bp.route('/metrics/reset', methods=['POST'])
@@ -55,23 +57,6 @@ def create_metrics_routes():
             "status": "success",
             "message": "Metrics have been reset"
         }), 200
-    
-    @metrics_bp.route('/metrics/history', methods=['GET'])
-    def get_metrics_history():
-        """
-        Get latency history for graphing.
-        
-        Returns:
-            JSON with timestamp and latency pairs
-        """
-        tracker = get_metrics_tracker()
-        history = tracker.get_latency_history()
-        
-        data = {
-            'timestamps': [int(ts * 1000) for ts, _ in history],
-            'latencies': [lat for _, lat in history]
-        }
-        return jsonify(data), 200
     
     @metrics_bp.route('/metrics/system', methods=['GET'])
     def get_system_metrics():
@@ -426,15 +411,14 @@ def create_metrics_routes():
         
         async function updateDashboard() {
             try {
-                const [metricsRes, historyRes, systemRes] = await Promise.all([
+                const [metricsRes, systemRes] = await Promise.all([
                     fetch('/api/metrics'),
-                    fetch('/api/metrics/history'),
                     fetch('/api/metrics/system')
                 ]);
                 
                 const metricsData = await metricsRes.json();
                 const metrics = metricsData.metrics;
-                const history = await historyRes.json();
+                const latencies = metricsData.latencies;
                 const system = await systemRes.json();
                 
                 // Update metric cards
@@ -478,9 +462,9 @@ def create_metrics_routes():
                 distributionChart.update('none');
                 
                 // Update latency timeline
-                const displayCount = Math.min(50, history.latencies.length);
+                const displayCount = Math.min(50, latencies.length);
                 latencyChart.data.labels = Array(displayCount).fill('');
-                latencyChart.data.datasets[0].data = history.latencies.slice(-displayCount);
+                latencyChart.data.datasets[0].data = latencies.slice(-displayCount);
                 latencyChart.update('none');
                 
             } catch (error) {
