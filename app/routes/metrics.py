@@ -305,7 +305,7 @@ def create_metrics_routes():
         </div>
         
         <div class="footer">
-            Dashboard auto-refreshes every 3 seconds | Lingulu Machine Learning &copy; 2026
+            Dashboard auto-refreshes every 5 seconds | Lingulu Machine Learning &copy; 2026
         </div>
     </div>
     
@@ -403,6 +403,8 @@ def create_metrics_routes():
             }
         });
         
+        let isUpdating = false; // Prevent concurrent updates
+        
         function formatUptime(seconds) {
             const hours = Math.floor(seconds / 3600);
             const minutes = Math.floor((seconds % 3600) / 60);
@@ -410,6 +412,12 @@ def create_metrics_routes():
         }
         
         async function updateDashboard() {
+            // Skip if already updating
+            if (isUpdating) {
+                return;
+            }
+            
+            isUpdating = true;
             try {
                 const [metricsRes, systemRes] = await Promise.all([
                     fetch('/api/metrics'),
@@ -469,11 +477,16 @@ def create_metrics_routes():
                 
             } catch (error) {
                 console.error('Failed to update dashboard:', error);
+            } finally {
+                isUpdating = false;
             }
         }
         
+        // Initial update
         updateDashboard();
-        setInterval(updateDashboard, 3000);
+        
+        // Auto-refresh every 5 seconds (with debouncing)
+        setInterval(updateDashboard, 5000);
     </script>
 </body>
 </html>"""

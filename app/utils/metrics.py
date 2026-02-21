@@ -31,6 +31,11 @@ class MetricsTracker:
         self.total_errors = 0
         self.start_time = time.time()
         
+        # System metrics caching (to avoid frequent polling)
+        self._system_metrics_cache = None
+        self._system_metrics_cache_time = 0
+        self._system_metrics_cache_ttl = 2.0  # Cache for 2 seconds
+        
         # Check GPU availability
         try:
             import torch
@@ -117,8 +122,17 @@ class MetricsTracker:
     
     def get_system_metrics(self) -> Dict:
         """Get system resource usage (CPU, RAM, GPU).
-        Lightweight - cached for 1 second to avoid overhead.
+        Cached for 2 seconds to avoid frequent polling.
         """
+        with self.lock:
+            current_time = time.time()
+            
+            # Return cached result if still valid
+            if (self._system_metrics_cache is not None and 
+                current_time - self._system_metrics_cache_time < self._system_metrics_cache_ttl):
+                return self._system_metrics_cache
+        
+        # Cache expired or not initialized, fetch new data
         try:
             cpu_percent = psutil.cpu_percent(interval=0)
             memory = psutil.virtual_memory()
@@ -152,6 +166,11 @@ class MetricsTracker:
                 except Exception:
                     pass
             
+            # Update cache
+            with self.lock:
+                self._system_metrics_cache = result
+                self._system_metrics_cache_time = current_time
+            
             return result
         except Exception:
             return {
@@ -164,12 +183,14 @@ class MetricsTracker:
             }
     
     def reset_metrics(self):
-        """Reset all metrics including latency data."""
+        """Reset all metrics including latency data.
+        Note: uptime (start_time) is NOT reset to maintain accurate uptime tracking.
+        """
         with self.lock:
             self.inference_latencies.clear()
             self.total_requests = 0
             self.total_errors = 0
-            self.start_time = time.time()
+            # DO NOT reset start_time - uptime should continue running
     
     @staticmethod
     def _percentile(sorted_data: List[float], percentile: int) -> float:
