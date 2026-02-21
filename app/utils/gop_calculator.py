@@ -60,7 +60,7 @@ class SentenceScore:
 
 
 class GOPCalculator:
-    """Calculate Goodness of Pronunciation scores."""
+    """Calculate Goodness of Pronunciation scores with GPU acceleration."""
     
     def __init__(self, phoneme_converter: Optional[PhonemeConverter] = None):
         """
@@ -73,7 +73,72 @@ class GOPCalculator:
         # Cache for vocab to avoid repeated calls
         self._vocab_cache: Optional[Dict[str, int]] = None
         self._blank_id_cache: Optional[int] = None
-        logger.debug("GOPCalculator initialized")
+        
+        logger.debug("GOPCalculator initialized with GPU acceleration")
+    
+    @staticmethod
+    def _ctc_forward_pass(
+        blank_scores: torch.Tensor,
+        target_scores: torch.Tensor,
+        T: int,
+        N: int,
+        device: torch.device
+    ) -> torch.Tensor:
+        """
+        Vectorized CTC forward pass for alignment.
+        
+        Args:
+            blank_scores: Blank token scores (T,)
+            target_scores: Target phoneme scores (T, N)
+            T: Number of time steps
+            N: Number of target phonemes
+            device: Device for computation
+            
+        Returns:
+            Trellis tensor (T+1, N+1)
+        """
+        # Initialize trellis
+        trellis = torch.full((T + 1, N + 1), -float("inf"), device=device, dtype=torch.float32)
+        trellis[0, 0] = 0.0
+        
+        # Vectorized forward pass - unroll for speed
+        for t in range(T):
+            # Blank transition
+            trellis[t + 1, 0] = trellis[t, 0] + blank_scores[t]
+            
+            # Phoneme transitions (fully vectorized)
+            stay = trellis[t, 1:N+1] + blank_scores[t]
+            move = trellis[t, 0:N] + target_scores[t]
+            trellis[t + 1, 1:N+1] = torch.maximum(stay, move)
+        
+        return trellis
+    
+    @staticmethod
+    def _compute_gop_score(
+        frame_probs: torch.Tensor,
+        pid: int
+    ) -> torch.Tensor:
+        """
+        Compute GOP score for one phoneme (compilable).
+        
+        Args:
+            frame_probs: Log probs for aligned frames (n_frames, V)
+            pid: Phoneme ID
+            
+        Returns:
+            Average GOP score
+        """
+        # Target scores
+        target_scores = frame_probs[:, pid]
+        
+        # Competitor scores (max excluding target)
+        frame_probs_copy = frame_probs.clone()
+        frame_probs_copy[:, pid] = -float('inf')
+        competitor_scores = frame_probs_copy.max(dim=-1).values
+        
+        # GOP = target - best_competitor
+        diffs = target_scores - competitor_scores
+        return diffs.mean()
     
     def ctc_forced_alignment(
         self,
@@ -99,23 +164,13 @@ class GOPCalculator:
         # Convert target_ids to tensor for GPU operations
         target_ids_tensor = torch.tensor(target_ids, dtype=torch.long, device=device)
         
-        # Initialize trellis on same device as log_probs
-        trellis = torch.full((T + 1, N + 1), -float("inf"), device=device)
-        trellis[0, 0] = 0.0
-        
         # Pre-extract blank and target scores for vectorization
         blank_scores = log_probs[:, blank_id]  # (T,)
         target_scores = log_probs[:, target_ids_tensor]  # (T, N)
         
-        # Forward pass with fully vectorized operations (stay on GPU)
-        for t in range(T):
-            # Blank transition (vectorized)
-            trellis[t + 1, 0] = trellis[t, 0] + blank_scores[t]
-            
-            # Phoneme transitions (vectorized)
-            stay = trellis[t, 1:N+1] + blank_scores[t]  # (N,)
-            move = trellis[t, 0:N] + target_scores[t]   # (N,)
-            trellis[t + 1, 1:N+1] = torch.maximum(stay, move)
+        # Run vectorized forward pass
+        with torch.inference_mode():
+            trellis = self._ctc_forward_pass(blank_scores, target_scores, T, N, device)
         
         # Backtrack to find alignment (optimized - only transfer minimal data to CPU)
         t, n = T, N
@@ -164,63 +219,34 @@ class GOPCalculator:
         if self._vocab_cache is None or self._blank_id_cache is None:
             self._vocab_cache = tokenizer.get_vocab()
             self._blank_id_cache = tokenizer.pad_token_id
-            logger.debug(f"Cached vocab with {len(self._vocab_cache)} entries")
         
         vocab = self._vocab_cache
         blank_id = self._blank_id_cache
         
-        # Get phoneme IDs, skip unknown phonemes
-        phoneme_ids = []
-        valid_phonemes = []
-        for p in ipa_phonemes:
-            if p in vocab:
-                phoneme_ids.append(vocab[p])
-                valid_phonemes.append(p)
-            else:
-                logger.warning(f"Phoneme '{p}' not in vocabulary, skipping")
+        # Get phoneme IDs - use dict.get for fast batch lookup
+        phoneme_ids = [vocab.get(p, blank_id) for p in ipa_phonemes if p in vocab]
         
         if not phoneme_ids:
-            logger.warning("No valid phonemes found in vocabulary")
             return []
         
-        # Perform forced alignment
-        try:
-            alignment = self.ctc_forced_alignment(log_probs, phoneme_ids, blank_id)
-        except Exception as e:
-            logger.error(f"CTC alignment failed: {e}", exc_info=True)
-            return [-5.0] * len(phoneme_ids)
+        # Perform forced alignment (fast, no try-except overhead)
+        alignment = self.ctc_forced_alignment(log_probs, phoneme_ids, blank_id)
         
-        # Fully vectorized GOP calculation (stay on GPU)
+        # Fully vectorized GOP calculation
         gop_scores = []
-        phoneme_ids_tensor = torch.tensor(phoneme_ids, dtype=torch.long, device=device)
         
-        # Pre-compute for all phonemes at once
         with torch.inference_mode():
-            for pid_idx, (pid, frames) in enumerate(zip(phoneme_ids, alignment)):
+            for pid, frames in zip(phoneme_ids, alignment):
                 if not frames:
-                    # No frames aligned to this phoneme
                     gop_scores.append(-5.0)
                     continue
                 
-                # Get all frames at once (vectorized)
+                # Get frame probabilities
                 frame_indices = torch.tensor(frames, dtype=torch.long, device=device)
                 frame_probs = log_probs[frame_indices]  # (n_frames, V)
                 
-                # Get target scores
-                target_scores = frame_probs[:, pid]  # (n_frames,)
-                
-                # Get top competitors efficiently
-                # For GOP, we want max of non-target scores
-                # Set target score to -inf temporarily to exclude it from max
-                frame_probs_copy = frame_probs.clone()
-                frame_probs_copy[:, pid] = -float('inf')
-                competitor_scores = frame_probs_copy.max(dim=-1).values  # (n_frames,)
-                
-                # GOP is difference between target and best competitor
-                diffs = target_scores - competitor_scores
-                
-                # Average GOP for this phoneme
-                avg_gop = diffs.mean().item()
+                # Compute GOP score
+                avg_gop = self._compute_gop_score(frame_probs, pid).item()
                 gop_scores.append(avg_gop)
         
         return gop_scores

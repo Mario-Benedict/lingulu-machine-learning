@@ -12,6 +12,7 @@ from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 from app.utils.logger import get_logger
 from app.utils.exceptions import ModelInferenceError, ModelNotLoadedError
 from app.utils.gop_calculator import GOPCalculator
+from app.utils.metrics import get_metrics_tracker
 
 logger = get_logger(__name__)
 
@@ -123,41 +124,22 @@ class Wav2Vec2PronunciationModel:
             
             # Enable inference optimization
             torch.set_grad_enabled(False)
+            logger.info("Using optimized inference mode (inference_mode + mixed precision + vectorization)")
             
-            # Try to compile model with PyTorch 2.0+ for extra speedup
-            # Can be disabled via DISABLE_TORCH_COMPILE=1 environment variable
-            disable_compile = os.environ.get('DISABLE_TORCH_COMPILE', '0') == '1'
-            
-            if hasattr(torch, 'compile') and self.device.type == 'cuda' and not disable_compile:
+            # Warmup inference pipeline to pre-populate caches
+            if self.enable_gop and self.gop_calculator and self.g2p_model:
                 try:
-                    logger.info("Attempting to compile model with torch.compile()...")
+                    logger.info("Warming up GOP calculator and caches...")
+                    warmup_audio = np.random.randn(16000).astype(np.float32)
+                    warmup_text = "hello world"
                     
-                    # Configure torch._dynamo to suppress errors and fall back to eager mode
-                    if hasattr(torch, '_dynamo'):
-                        torch._dynamo.config.suppress_errors = True
-                    
-                    # Use 'default' mode instead of 'reduce-overhead' for better compatibility
-                    compiled_model = torch.compile(self.model, mode='default')
-                    
-                    # Test compilation with dummy input before committing
-                    logger.debug("Testing compiled model with dummy input...")
-                    dummy_input = torch.randn(1, 16000, device=self.device)
+                    # Run one inference to warm up caches
                     with torch.inference_mode():
-                        _ = compiled_model(dummy_input)
+                        _ = self.predict(warmup_audio, reference_text=warmup_text)
                     
-                    # If test succeeded, use compiled model
-                    self.model = compiled_model
-                    logger.info("✅ Model compiled successfully with torch.compile()")
-                    
+                    logger.info("✅ Warmup complete - all caches ready")
                 except Exception as e:
-                    logger.warning(
-                        f"torch.compile() failed or unavailable: {str(e)[:200]}. "
-                        f"Falling back to eager mode (still optimized with inference_mode + mixed precision)."
-                    )
-                    # Ensure we're using the original uncompiled model
-                    pass
-            elif disable_compile:
-                logger.info("torch.compile() disabled via DISABLE_TORCH_COMPILE environment variable")
+                    logger.warning(f"Warmup failed (non-critical): {e}")
             
             load_time = time.time() - start_time
             self._is_loaded = True
@@ -201,11 +183,13 @@ class Wav2Vec2PronunciationModel:
             raise ModelNotLoadedError("Model must be loaded before prediction")
         
         try:
-            start_time = time.perf_counter()
+            total_start = time.perf_counter()
             
-            # Fast preprocessing - no logging overhead
+            # Preprocessing and inference with separate timing
+            inference_start = time.perf_counter()
+            
             with torch.inference_mode():
-                # Process audio directly
+                # Fast preprocessing
                 inputs = self.processor(
                     audio_array,
                     sampling_rate=self.sampling_rate,
@@ -215,23 +199,34 @@ class Wav2Vec2PronunciationModel:
                 
                 input_values = inputs.input_values.to(self.device, non_blocking=True)
                 
-                # Model inference with mixed precision on GPU
+                # Model inference with mixed precision
                 if self.device.type == 'cuda':
                     with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
                         logits = self.model(input_values).logits
                 else:
                     logits = self.model(input_values).logits
             
-            # Decode transcription (happens once, outside inference_mode)
+            # Track pure inference time
+            inference_latency = time.perf_counter() - inference_start
+            
+            # Track metrics (inference only)
+            try:
+                metrics_tracker = get_metrics_tracker()
+                metrics_tracker.record_inference_latency(inference_latency)
+            except Exception:
+                pass  # Don't fail request if metrics fails
+            
+            # Decode transcription
             predicted_ids = torch.argmax(logits, dim=-1)
             transcription = self.processor.batch_decode(predicted_ids.cpu())[0]
             
-            # GOP calculation if needed (separate context for clarity)
+            # GOP calculation with separate timing
             gop_result = None
+            gop_latency = 0.0
+            
             if reference_text and self.enable_gop and self.gop_calculator and self.g2p_model:
                 gop_start = time.perf_counter()
                 try:
-                    # Calculate log probs outside inference_mode (already computed)
                     log_probs = torch.log_softmax(logits.squeeze(0), dim=-1)
                     
                     sentence_score = self.gop_calculator.calculate_sentence_score(
@@ -246,28 +241,30 @@ class Wav2Vec2PronunciationModel:
                     gop_result = sentence_score.to_dict()
                     gop_result['gop_latency_seconds'] = round(gop_latency, 5)
                 except Exception as e:
-                    logger.error(f"GOP failed: {str(e)[:100]}")
+                    logger.error(f"GOP calculation failed: {e}")
                     gop_result = {'error': 'GOP calculation failed', 'details': str(e)}
+                    gop_latency = 0.0
             
-            latency = time.perf_counter() - start_time
+            total_latency = time.perf_counter() - total_start
             
-            # Build result quickly
+            # Build result - latency is inference time only
             result = {
                 "transcription": transcription,
-                "latency_seconds": round(latency, 5),
+                "latency_seconds": round(inference_latency, 5),
                 "audio_samples": len(audio_array),
                 "audio_duration_seconds": round(len(audio_array) / self.sampling_rate, 2)
             }
             
-            # Add GOP if available
             if reference_text:
                 if gop_result:
                     result['pronounciation_assessment'] = gop_result
-                else:
+                elif not self.enable_gop:
                     result['pronounciation_assessment'] = {
                         'error': 'GOP not enabled',
                         'gop_status': 'disabled'
                     }
+            
+            logger.info(f"Inference: {inference_latency:.5f}s, GOP: {gop_latency:.5f}s, Total: {total_latency:.5f}s")
             
             return result
             

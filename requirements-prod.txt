@@ -23,8 +23,8 @@ huggingface_hub==1.4.1
 safetensors==0.7.0
 tokenizers==0.22.2
 
-# AWS CloudWatch Monitoring
-boto3==1.36.19
+# Monitoring
+psutil==5.9.4
 
 # Minimal utilities only
 python-dotenv==1.0.1

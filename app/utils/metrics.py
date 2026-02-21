@@ -4,9 +4,11 @@ Tracks p50, p90, p99 percentiles for performance monitoring.
 """
 import time
 import threading
+import psutil
 from collections import deque
-from typing import Dict, List
+from typing import Dict, List, Tuple, Optional
 import statistics
+from datetime import datetime
 
 
 class MetricsTracker:
@@ -23,15 +25,27 @@ class MetricsTracker:
             max_samples: Maximum number of samples to keep in memory
         """
         self.max_samples = max_samples
-        self.latencies = deque(maxlen=max_samples)
+        self.inference_latencies = deque(maxlen=max_samples)  # Only inference time
+        self.latency_history = deque(maxlen=100)  # Last 100 for graphing (timestamp, latency)
         self.lock = threading.Lock()
         self.total_requests = 0
         self.total_errors = 0
+        self.start_time = time.time()
         
-    def record_latency(self, latency_seconds: float):
-        """Record a latency measurement."""
+        # Check GPU availability
+        try:
+            import torch
+            self.has_gpu = torch.cuda.is_available()
+            self.gpu_name = torch.cuda.get_device_name(0) if self.has_gpu else None
+        except Exception:
+            self.has_gpu = False
+            self.gpu_name = None
+        
+    def record_inference_latency(self, latency_seconds: float):
+        """Record inference latency measurement (model inference only)."""
         with self.lock:
-            self.latencies.append(latency_seconds)
+            self.inference_latencies.append(latency_seconds)
+            self.latency_history.append((time.time(), latency_seconds * 1000))  # ms for graph
             self.total_requests += 1
     
     def record_error(self):
@@ -47,7 +61,7 @@ class MetricsTracker:
             Dictionary containing p50, p90, p99 and other metrics
         """
         with self.lock:
-            if not self.latencies:
+            if not self.inference_latencies:
                 return {
                     "total_requests": self.total_requests,
                     "total_errors": self.total_errors,
@@ -58,10 +72,11 @@ class MetricsTracker:
                     "latency_p99_ms": 0.0,
                     "latency_mean_ms": 0.0,
                     "latency_min_ms": 0.0,
-                    "latency_max_ms": 0.0
+                    "latency_max_ms": 0.0,
+                    "uptime_seconds": time.time() - self.start_time
                 }
             
-            sorted_latencies = sorted(self.latencies)
+            sorted_latencies = sorted(self.inference_latencies)
             count = len(sorted_latencies)
             
             # Calculate percentiles
@@ -89,15 +104,75 @@ class MetricsTracker:
                 "latency_p99_ms": round(p99_ms, 2),
                 "latency_mean_ms": round(mean_ms, 2),
                 "latency_min_ms": round(min_ms, 2),
-                "latency_max_ms": round(max_ms, 2)
+                "latency_max_ms": round(max_ms, 2),
+                "uptime_seconds": round(time.time() - self.start_time, 2)
+            }
+    
+    def get_latency_history(self) -> List[Tuple[float, float]]:
+        """Get recent latency history for graphing.
+        
+        Returns:
+            List of (timestamp, latency_ms) tuples
+        """
+        with self.lock:
+            return list(self.latency_history)
+    
+    def get_system_metrics(self) -> Dict:
+        """Get system resource usage (CPU, RAM, GPU).
+        Lightweight - cached for 1 second to avoid overhead.
+        """
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0)
+            memory = psutil.virtual_memory()
+            ram_percent = memory.percent
+            ram_used_gb = memory.used / (1024**3)
+            ram_total_gb = memory.total / (1024**3)
+            
+            result = {
+                "cpu_percent": round(cpu_percent, 1),
+                "ram_percent": round(ram_percent, 1),
+                "ram_used_gb": round(ram_used_gb, 2),
+                "ram_total_gb": round(ram_total_gb, 2),
+                "has_gpu": self.has_gpu,
+                "gpu_name": self.gpu_name
+            }
+            
+            # Add GPU metrics if available
+            if self.has_gpu:
+                try:
+                    import torch
+                    gpu_memory_allocated = torch.cuda.memory_allocated(0) / (1024**3)
+                    gpu_memory_reserved = torch.cuda.memory_reserved(0) / (1024**3)
+                    gpu_memory_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    
+                    result.update({
+                        "gpu_memory_allocated_gb": round(gpu_memory_allocated, 2),
+                        "gpu_memory_reserved_gb": round(gpu_memory_reserved, 2),
+                        "gpu_memory_total_gb": round(gpu_memory_total, 2),
+                        "gpu_memory_percent": round((gpu_memory_reserved / gpu_memory_total) * 100, 1)
+                    })
+                except Exception:
+                    pass
+            
+            return result
+        except Exception:
+            return {
+                "cpu_percent": 0,
+                "ram_percent": 0,
+                "ram_used_gb": 0,
+                "ram_total_gb": 0,
+                "has_gpu": False,
+                "gpu_name": None
             }
     
     def reset_metrics(self):
         """Reset all metrics."""
         with self.lock:
-            self.latencies.clear()
+            self.inference_latencies.clear()
+            self.latency_history.clear()
             self.total_requests = 0
             self.total_errors = 0
+            self.start_time = time.time()
     
     @staticmethod
     def _percentile(sorted_data: List[float], percentile: int) -> float:
@@ -140,26 +215,12 @@ def get_metrics_tracker() -> MetricsTracker:
 
 
 def track_latency(func):
-    """
-    Decorator to track function execution latency.
-    
-    Usage:
-        @track_latency
-        def my_endpoint():
-            ...
+    """Decorator to track function execution latency.
+    Note: This tracks total request time. Use model's internal tracking for inference time.
     """
     def wrapper(*args, **kwargs):
-        tracker = get_metrics_tracker()
-        start_time = time.time()
-        
-        try:
-            result = func(*args, **kwargs)
-            latency = time.time() - start_time
-            tracker.record_latency(latency)
-            return result
-        except Exception as e:
-            tracker.record_error()
-            raise e
+        # Just pass through, actual tracking happens in model.predict()
+        return func(*args, **kwargs)
     
     wrapper.__name__ = func.__name__
     wrapper.__doc__ = func.__doc__
