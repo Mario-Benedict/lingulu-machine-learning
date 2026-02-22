@@ -36,7 +36,7 @@ The pipeline works as follows:
 
 | Component | Description |
 |-----------|-------------|
-| Base Model | Facebook Wav2Vec2 |
+| Base Model | moxeeeem/wav2vec2-finetuned-pronunciation-correction2 |
 | Fine-tuning Target | Phoneme recognition (not text ASR) |
 | Vocabulary | Custom phoneme set (ARPAbet/IPA-based) |
 | Output | Phoneme probability distribution |
@@ -46,6 +46,7 @@ The pipeline works as follows:
 ## 📂 Folder Structure
 ```
 lingulu-machine-learning/
+│── app/
 │── notebooks/
 │   ├── models/
 │   │   ├── v1/
@@ -68,7 +69,7 @@ lingulu-machine-learning/
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11+
 - PyTorch
 - Transformers (HuggingFace)
 - Librosa
@@ -80,22 +81,11 @@ lingulu-machine-learning/
 pip install -r requirements.txt
 ```
 
-### 🧪 Training the Model
-
+### Running server 
 ```bash
-python train.py
+python -m app.app
 ```
 
-### 🎙️ Inference (Pronunciation Evaluation)
-
-```bash
-python infer.py --audio sample.wav --text "hello world"
-```
-
-### Output 
-```yaml
-
-```
 ## 🧮 GOP Scoring
 
 GOP measures how closely a spoken phoneme matches the expected phoneme.
@@ -123,7 +113,82 @@ Input:
 Output (JSON):
 
 ```json
-
+{
+    "audio_duration_seconds": 1.28,
+    "audio_samples": 20480,
+    "filename": "He is a teacher.mp3",
+    "latency_seconds": 0.29187,
+    "pronounciation_assessment": {
+        "average_score": 57.7,
+        "gop_latency_seconds": 0.19755,
+        "text": "He is a teacher",
+        "words": [
+            {
+                "phonemes": [
+                    {
+                        "phoneme": "h",
+                        "score": 89.2
+                    },
+                    {
+                        "phoneme": "i",
+                        "score": 73.2
+                    }
+                ],
+                "score": 81.2,
+                "word": "He"
+            },
+            {
+                "phonemes": [
+                    {
+                        "phoneme": "ɪ",
+                        "score": 78.9
+                    },
+                    {
+                        "phoneme": "z",
+                        "score": 83.1
+                    }
+                ],
+                "score": 81.0,
+                "word": "is"
+            },
+            {
+                "phonemes": [
+                    {
+                        "phoneme": "ə",
+                        "score": 0.0
+                    }
+                ],
+                "score": 0.0,
+                "word": "a"
+            },
+            {
+                "phonemes": [
+                    {
+                        "phoneme": "t",
+                        "score": 100.0
+                    },
+                    {
+                        "phoneme": "i",
+                        "score": 95.5
+                    },
+                    {
+                        "phoneme": "tʃ",
+                        "score": 78.2
+                    },
+                    {
+                        "phoneme": "ɚ",
+                        "score": 0.0
+                    }
+                ],
+                "score": 68.4,
+                "word": "teacher"
+            }
+        ]
+    },
+    "reference_text": "He is a teacher",
+    "status": "success",
+    "transcription": "hiɪzʌtitʃɚ"
+}
 ```
 
 ---
