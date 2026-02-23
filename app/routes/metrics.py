@@ -1,6 +1,6 @@
 """
 Metrics endpoint for monitoring API performance.
-Provides p50, p90, p99 latency metrics and dashboard.
+Provides p50, p90, p95, p99 latency metrics and dashboard.
 """
 from flask import Blueprint, jsonify, render_template_string
 
@@ -26,7 +26,7 @@ def create_metrics_routes():
         Get current API metrics including latency percentiles and latencies list.
         
         Returns:
-            JSON with p50, p90, p99 latency and recorded latencies
+            JSON with p50, p90, p95, p99 latency and recorded latencies
         """
         tracker = get_metrics_tracker()
         metrics = tracker.get_metrics()
@@ -270,6 +270,10 @@ def create_metrics_routes():
                 <div class="metric-value" id="p90">--<span class="metric-unit">ms</span></div>
             </div>
             <div class="metric-card">
+                <div class="metric-label">P95 Latency</div>
+                <div class="metric-value" id="p95">--<span class="metric-unit">ms</span></div>
+            </div>
+            <div class="metric-card">
                 <div class="metric-label">P99 Latency</div>
                 <div class="metric-value" id="p99">--<span class="metric-unit">ms</span></div>
             </div>
@@ -357,10 +361,10 @@ def create_metrics_routes():
         const distributionChart = new Chart(distributionCtx, {
             type: 'bar',
             data: {
-                labels: ['P50', 'P90', 'P99', 'Mean'],
+                labels: ['P50', 'P90', 'P95', 'P99', 'Mean'],
                 datasets: [{
-                    data: [0, 0, 0, 0],
-                    backgroundColor: ['#4a4a4a', '#6a6a6a', '#8a8a8a', '#5a5a5a'],
+                    data: [0, 0, 0, 0, 0],
+                    backgroundColor: ['#4a4a4a', '#6a6a6a', '#7a7a7a', '#8a8a8a', '#5a5a5a'],
                     borderColor: '#2c2c2c',
                     borderWidth: 1
                 }]
@@ -432,6 +436,7 @@ def create_metrics_routes():
                 // Update metric cards
                 document.getElementById('p50').innerHTML = metrics.latency_p50_ms.toFixed(1) + '<span class="metric-unit">ms</span>';
                 document.getElementById('p90').innerHTML = metrics.latency_p90_ms.toFixed(1) + '<span class="metric-unit">ms</span>';
+                document.getElementById('p95').innerHTML = metrics.latency_p95_ms.toFixed(1) + '<span class="metric-unit">ms</span>';
                 document.getElementById('p99').innerHTML = metrics.latency_p99_ms.toFixed(1) + '<span class="metric-unit">ms</span>';
                 document.getElementById('mean').innerHTML = metrics.latency_mean_ms.toFixed(1) + '<span class="metric-unit">ms</span>';
                 document.getElementById('total-requests').textContent = metrics.total_requests;
@@ -464,6 +469,7 @@ def create_metrics_routes():
                 distributionChart.data.datasets[0].data = [
                     metrics.latency_p50_ms,
                     metrics.latency_p90_ms,
+                    metrics.latency_p95_ms,
                     metrics.latency_p99_ms,
                     metrics.latency_mean_ms
                 ];

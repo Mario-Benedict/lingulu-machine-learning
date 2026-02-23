@@ -1,6 +1,6 @@
 """
 Simple in-memory metrics tracking for API latency monitoring.
-Tracks p50, p90, p99 percentiles for performance monitoring.
+Tracks p50, p90, p95, p99 percentiles for performance monitoring.
 """
 import time
 import threading
@@ -54,66 +54,79 @@ class MetricsTracker:
     def get_metrics(self) -> Dict:
         """
         Get current metrics including percentiles.
+        Thread-safe snapshot to ensure consistency.
         
         Returns:
-            Dictionary containing p50, p90, p99 and other metrics
+            Dictionary containing p50, p90, p95, p99 and other metrics
         """
         with self.lock:
+            # Take snapshot of all data at once for consistency
+            total_requests = self.total_requests
+            total_errors = self.total_errors
+            uptime = time.time() - self.start_time
+            
             if not self.inference_latencies:
                 return {
-                    "total_requests": self.total_requests,
-                    "total_errors": self.total_errors,
+                    "total_requests": total_requests,
+                    "total_errors": total_errors,
                     "error_rate": 0.0,
                     "samples_count": 0,
                     "latency_p50_ms": 0.0,
                     "latency_p90_ms": 0.0,
+                    "latency_p95_ms": 0.0,
                     "latency_p99_ms": 0.0,
                     "latency_mean_ms": 0.0,
                     "latency_min_ms": 0.0,
                     "latency_max_ms": 0.0,
-                    "uptime_seconds": time.time() - self.start_time
+                    "uptime_seconds": round(uptime, 2)
                 }
             
-            sorted_latencies = sorted(self.inference_latencies)
+            # Create immutable sorted snapshot
+            sorted_latencies = sorted(list(self.inference_latencies))
             count = len(sorted_latencies)
             
-            # Calculate percentiles
+            # Calculate percentiles from snapshot
             p50 = self._percentile(sorted_latencies, 50)
             p90 = self._percentile(sorted_latencies, 90)
+            p95 = self._percentile(sorted_latencies, 95)
             p99 = self._percentile(sorted_latencies, 99)
             
             # Convert to milliseconds
             p50_ms = p50 * 1000
             p90_ms = p90 * 1000
+            p95_ms = p95 * 1000
             p99_ms = p99 * 1000
             mean_ms = statistics.mean(sorted_latencies) * 1000
             min_ms = min(sorted_latencies) * 1000
             max_ms = max(sorted_latencies) * 1000
             
-            error_rate = (self.total_errors / self.total_requests * 100) if self.total_requests > 0 else 0.0
+            error_rate = (total_errors / total_requests * 100) if total_requests > 0 else 0.0
             
             return {
-                "total_requests": self.total_requests,
-                "total_errors": self.total_errors,
+                "total_requests": total_requests,
+                "total_errors": total_errors,
                 "error_rate": round(error_rate, 2),
                 "samples_count": count,
                 "latency_p50_ms": round(p50_ms, 2),
                 "latency_p90_ms": round(p90_ms, 2),
+                "latency_p95_ms": round(p95_ms, 2),
                 "latency_p99_ms": round(p99_ms, 2),
                 "latency_mean_ms": round(mean_ms, 2),
                 "latency_min_ms": round(min_ms, 2),
                 "latency_max_ms": round(max_ms, 2),
-                "uptime_seconds": round(time.time() - self.start_time, 2)
+                "uptime_seconds": round(uptime, 2)
             }
     
     def get_latencies_list(self) -> List[float]:
         """Get recorded latencies as list (in milliseconds).
+        Thread-safe snapshot.
         
         Returns:
             List of latency values in ms
         """
         with self.lock:
-            return [lat * 1000 for lat in self.inference_latencies]
+            # Return immutable snapshot
+            return [lat * 1000 for lat in list(self.inference_latencies)]
     
     def get_system_metrics(self) -> Dict:
         """Get system resource usage (CPU, RAM, GPU).
