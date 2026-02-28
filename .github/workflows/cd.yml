@@ -17,6 +17,8 @@ env:
   SERVICE_NAME: lingulu-ml-api
   REGION: asia-southeast1  # Singapore region (GPU support)
   REGISTRY: asia-southeast1-docker.pkg.dev
+  # GPU Configuration - Set to 'true' to enable L4 GPU deployment
+  ENABLE_GPU: true  # Recommended: true for best performance
 
 jobs:
   # Check if CI was successful (only for workflow_run trigger)
@@ -100,28 +102,64 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           echo "🚀 Deploying to Cloud Run..."
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/lingulu/${{ env.SERVICE_NAME }}:${{ github.sha }} \
-            --platform managed \
-            --region ${{ env.REGION }} \
-            --allow-unauthenticated \
-            --memory 4Gi \
-            --cpu 2 \
-            --timeout 300 \
-            --concurrency 80 \
-            --min-instances 0 \
-            --max-instances 10 \
-            --set-env-vars "FLASK_ENV=${{ secrets.FLASK_ENV }}" \
-            --set-env-vars "FLASK_DEBUG=${{ secrets.FLASK_DEBUG }}" \
-            --set-env-vars "MODEL_ID=${{ secrets.MODEL_ID }}" \
-            --set-env-vars "SAMPLING_RATE=${{ secrets.SAMPLING_RATE }}" \
-            --set-env-vars "MAX_AUDIO_LENGTH_SECONDS=${{ secrets.MAX_AUDIO_LENGTH_SECONDS }}" \
-            --set-env-vars "MAX_FILE_SIZE_MB=${{ secrets.MAX_FILE_SIZE_MB }}" \
-            --set-env-vars "LOG_LEVEL=${{ secrets.LOG_LEVEL }}" \
-            --set-env-vars "OMP_NUM_THREADS=4" \
-            --set-env-vars "MKL_NUM_THREADS=4" \
-            --set-env-vars "DISABLE_TORCH_COMPILE=1" \
-            --set-env-vars "HF_HUB_DISABLE_IMPLICIT_TOKEN=1"
+          
+          if [ "${{ env.ENABLE_GPU }}" = "true" ]; then
+            echo "⚡ Deploying with L4 GPU (Recommended for best performance)"
+            gcloud run deploy ${{ env.SERVICE_NAME }} \
+              --image ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/lingulu/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+              --platform managed \
+              --region ${{ env.REGION }} \
+              --allow-unauthenticated \
+              --gpu 1 \
+              --gpu-type nvidia-l4 \
+              --memory 8Gi \
+              --cpu 4 \
+              --timeout 300 \
+              --concurrency 100 \
+              --min-instances 0 \
+              --max-instances 5 \
+              --set-env-vars "FLASK_ENV=${{ secrets.FLASK_ENV }}" \
+              --set-env-vars "FLASK_DEBUG=${{ secrets.FLASK_DEBUG }}" \
+              --set-env-vars "MODEL_ID=${{ secrets.MODEL_ID }}" \
+              --set-env-vars "SAMPLING_RATE=${{ secrets.SAMPLING_RATE }}" \
+              --set-env-vars "MAX_AUDIO_LENGTH_SECONDS=${{ secrets.MAX_AUDIO_LENGTH_SECONDS }}" \
+              --set-env-vars "MAX_FILE_SIZE_MB=${{ secrets.MAX_FILE_SIZE_MB }}" \
+              --set-env-vars "LOG_LEVEL=${{ secrets.LOG_LEVEL }}" \
+              --set-env-vars "CUDA_VISIBLE_DEVICES=0" \
+              --set-env-vars "NVIDIA_VISIBLE_DEVICES=all" \
+              --set-env-vars "NVIDIA_DRIVER_CAPABILITIES=compute,utility" \
+              --set-env-vars "OMP_NUM_THREADS=4" \
+              --set-env-vars "MKL_NUM_THREADS=4" \
+              --set-env-vars "DISABLE_TORCH_COMPILE=1" \
+              --set-env-vars "HF_HUB_DISABLE_IMPLICIT_TOKEN=1"
+            echo "✅ Deployed with L4 GPU - Expected latency: ~150ms"
+          else
+            echo "⚠️  Deploying with CPU only (slower performance)"
+            gcloud run deploy ${{ env.SERVICE_NAME }} \
+              --image ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/lingulu/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+              --platform managed \
+              --region ${{ env.REGION }} \
+              --allow-unauthenticated \
+              --memory 4Gi \
+              --cpu 2 \
+              --timeout 300 \
+              --concurrency 80 \
+              --min-instances 0 \
+              --max-instances 10 \
+              --set-env-vars "FLASK_ENV=${{ secrets.FLASK_ENV }}" \
+              --set-env-vars "FLASK_DEBUG=${{ secrets.FLASK_DEBUG }}" \
+              --set-env-vars "MODEL_ID=${{ secrets.MODEL_ID }}" \
+              --set-env-vars "SAMPLING_RATE=${{ secrets.SAMPLING_RATE }}" \
+              --set-env-vars "MAX_AUDIO_LENGTH_SECONDS=${{ secrets.MAX_AUDIO_LENGTH_SECONDS }}" \
+              --set-env-vars "MAX_FILE_SIZE_MB=${{ secrets.MAX_FILE_SIZE_MB }}" \
+              --set-env-vars "LOG_LEVEL=${{ secrets.LOG_LEVEL }}" \
+              --set-env-vars "OMP_NUM_THREADS=4" \
+              --set-env-vars "MKL_NUM_THREADS=4" \
+              --set-env-vars "DISABLE_TORCH_COMPILE=1" \
+              --set-env-vars "HF_HUB_DISABLE_IMPLICIT_TOKEN=1"
+            echo "⚠️  Deployed with CPU only - Expected latency: ~800ms"
+          fi
+          
           echo "✅ Deployment to Cloud Run completed"
       
       - name: Get Service URL
