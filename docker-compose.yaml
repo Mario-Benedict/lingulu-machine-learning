@@ -4,7 +4,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: app/Dockerfile
+      dockerfile: Dockerfile
     container_name: lingulu-ml-app
     ports:
       - "5000:5000"
@@ -18,6 +18,7 @@ services:
               capabilities: [gpu]
     environment:
       # Flask Configuration
+      - PORT=5000
       - FLASK_ENV=production
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5000
@@ -30,8 +31,8 @@ services:
       - MAX_FILE_SIZE_MB=10
     volumes:
       # Cache HuggingFace models and PyTorch to avoid re-downloading
-      - huggingface_cache:/app/.cache/huggingface
-      - torch_cache:/app/.cache/torch
+      - huggingface_cache:/workspace/.cache/huggingface
+      - torch_cache:/workspace/.cache/torch
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/model/health')"]
       interval: 30s
@@ -45,3 +46,6 @@ services:
 volumes:
   huggingface_cache:
   torch_cache:
+networks:
+  lingulu-network:
+    driver: bridge

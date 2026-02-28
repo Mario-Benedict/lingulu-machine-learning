@@ -207,7 +207,88 @@ Wav2Vec2 is used because:
 
 ---
 
-## 🚀 Future Improvements
+## 🚀 Deployment
+
+This API is deployed to **Google Cloud Run** in **Singapore region** (`asia-southeast1`) for GPU support and optimal latency in Southeast Asia.
+
+### Architecture
+
+- **Platform**: Google Cloud Run (Serverless container deployment)
+- **Region**: Singapore (asia-southeast1) - GPU support available
+- **Container**: Docker with NVIDIA CUDA 12.1 runtime
+- **Scaling**: Auto-scale 0→N instances based on traffic
+- **Cost**: Pay-per-use (no charge when idle)
+
+### Quick Deploy via GitHub Actions
+
+The repository is configured with CI/CD pipeline:
+
+1. **Push to `main` branch** → Automatically triggers:
+   - CI: Run tests and validation
+   - CD: Build Docker image → Push to Artifact Registry → Deploy to Cloud Run
+
+2. **Manual Deploy**: 
+   - Go to **Actions** tab → Select "CD - Deploy to Google Cloud Run" → Click "Run workflow"
+
+### API Endpoints
+
+Once deployed, the API is accessible at your Cloud Run service URL:
+
+```
+https://lingulu-ml-api-XXXXXX-as.a.run.app
+```
+
+**Available Endpoints:**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/model/health` | GET | Health check |
+| `/api/model/predict` | POST | Pronunciation assessment |
+| `/api/metrics` | GET | Performance metrics (p50, p90, p99) |
+
+### Example Usage
+
+```bash
+# Health check
+curl https://YOUR-SERVICE-URL/api/model/health
+
+# Pronunciation assessment
+curl -X POST https://YOUR-SERVICE-URL/api/model/predict \
+  -F "file=@audio.wav" \
+  -F "text=Hello world"
+```
+
+### Configuration
+
+Environment variables are injected at deployment via Cloud Run configuration:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MODEL_ID` | HuggingFace model ID | `marx90/lingulu_wav2vec2_pronounciation_finetune` |
+| `SAMPLING_RATE` | Audio sampling rate | `16000` |
+| `MAX_AUDIO_LENGTH_SECONDS` | Max audio duration | `60` |
+| `MAX_FILE_SIZE_MB` | Max upload size | `10` |
+| `LOG_LEVEL` | Logging level | `INFO` |
+
+### Local Testing
+
+```bash
+# Using Docker Compose (with GPU support)
+docker-compose up --build
+
+# API will be available at http://localhost:5000
+curl http://localhost:5000/api/model/health
+```
+
+### Full Documentation
+
+For detailed deployment instructions, environment setup, monitoring, and troubleshooting:
+
+📖 **See [DEPLOYMENT.md](./DEPLOYMENT.md)** for complete guide
+
+---
+
+## 🌟 Future Improvements
 
 - Support IPA phoneme set
 
