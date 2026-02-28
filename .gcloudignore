@@ -1,0 +1,103 @@
+# This file specifies files that are not uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.hypothesis/
+
+# Jupyter Notebooks
+notebooks/
+*.ipynb
+.ipynb_checkpoints
+
+# Git
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Docker (already building separate Docker image)
+.dockerignore
+
+# Documentation
+*.md
+README.md
+docs/
+CLOUDWATCH_MIGRATION.md
+
+# Development files
+requirements-dev.txt
+pytest.ini
+.coveragerc
+.flake8
+.pylintrc
+.editorconfig
+setup.py
+pyproject.toml
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.*
+.env.example
+
+# Cache
+.cache/
+*.cache
+.pytest_cache/
+
+# Models (will be downloaded at runtime)
+models/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Large test files
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+
+# Monitoring scripts (not needed in production)
+monitor_hf_deployment.py
+test_hf_deployment.py
+
+# Misc
+*.bak
+*.tmp
+.gcloudignore
